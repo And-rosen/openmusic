@@ -433,7 +433,11 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const updated = setPlaying(roomId, isPlaying);
+    const updated = setPlaying(roomId, socket.id, isPlaying);
+    if (!updated) {
+      callback?.({ success: false, error: '仅房主可暂停/播放' });
+      return;
+    }
     io.to(roomId).emit('room_update', updated);
     callback?.({ success: true, room: updated });
   });

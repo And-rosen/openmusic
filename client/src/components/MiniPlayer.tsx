@@ -165,19 +165,22 @@ export default function MiniPlayer({ onExpand }: Props) {
 
 
 
-        <button
-          onClick={handlePlayPause}
-          disabled={trackLoading}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 transition-transform disabled:opacity-60"
-        >
-          {trackLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : isPlaying ? (
-            <Pause className="w-4 h-4" />
-          ) : (
-            <Play className="w-4 h-4 ml-0.5" />
-          )}
-        </button>
+        {isOwner && (
+          <button
+            onClick={handlePlayPause}
+            disabled={trackLoading}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 transition-transform disabled:opacity-60"
+            title="暂停/播放"
+          >
+            {trackLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4 ml-0.5" />
+            )}
+          </button>
+        )}
 
         {isOwner ? (
           <button

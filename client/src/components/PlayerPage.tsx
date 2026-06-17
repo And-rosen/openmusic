@@ -266,19 +266,24 @@ export default function PlayerPage({ onClose }: Props) {
 
           <div className="w-12 2xl:w-20" />
 
-          <button
-            onClick={handlePlayPause}
-            disabled={trackLoading}
-            className="w-16 h-16 2xl:w-24 2xl:h-24 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 transition-transform shadow-lg shadow-black/30 disabled:opacity-60"
-          >
-            {trackLoading ? (
-              <Loader2 className="w-7 h-7 2xl:w-10 2xl:h-10 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="w-7 h-7 2xl:w-10 2xl:h-10" />
-            ) : (
-              <Play className="w-7 h-7 2xl:w-10 2xl:h-10 ml-0.5 2xl:ml-1" />
-            )}
-          </button>
+          {isOwner ? (
+            <button
+              onClick={handlePlayPause}
+              disabled={trackLoading}
+              className="w-16 h-16 2xl:w-24 2xl:h-24 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 transition-transform shadow-lg shadow-black/30 disabled:opacity-60"
+              title="暂停/播放"
+            >
+              {trackLoading ? (
+                <Loader2 className="w-7 h-7 2xl:w-10 2xl:h-10 animate-spin" />
+              ) : isPlaying ? (
+                <Pause className="w-7 h-7 2xl:w-10 2xl:h-10" />
+              ) : (
+                <Play className="w-7 h-7 2xl:w-10 2xl:h-10 ml-0.5 2xl:ml-1" />
+              )}
+            </button>
+          ) : (
+            <div className="w-16 h-16 2xl:w-24 2xl:h-24" />
+          )}
 
           {isOwner ? (
             <button

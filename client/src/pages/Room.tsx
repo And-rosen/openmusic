@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, Tv, Plus } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources } from '../api/music';
 
@@ -312,6 +312,15 @@ export default function Room() {
 
                 <span className="hidden sm:inline">{copied ? '已复制' : '分享房间'}</span>
 
+              </button>
+
+              <button
+                onClick={() => navigate('/')}
+                className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
+                title="创建房间"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">创建房间</span>
               </button>
 
             </div>

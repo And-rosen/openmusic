@@ -190,9 +190,10 @@ export async function skipSong(roomId, socketId) {
   return { room: serializeRoom(room) };
 }
 
-export function setPlaying(roomId, isPlaying) {
+export function setPlaying(roomId, socketId, isPlaying) {
   const room = rooms.get(roomId);
   if (!room || !room.current) return null;
+  if (room.ownerId !== socketId) return null;
 
   room.isPlaying = isPlaying;
   if (isPlaying) {
