@@ -53,6 +53,8 @@ export interface SkipRequest {
 
 export interface RoomState {
   id: string;
+  name: string;
+  hasPassword?: boolean;
   ownerId: string | null;
   queue: QueueItem[];
   current: QueueItem | null;
@@ -63,6 +65,23 @@ export interface RoomState {
   jumpRequests: JumpRequest[];
   skipRequests: SkipRequest[];
   messages: ChatMessage[];
+}
+
+export interface RoomSummary {
+  id: string;
+  name: string;
+  userCount: number;
+  hasPassword: boolean;
+  isPlaying: boolean;
+  currentSong: { name: string; artist: string } | null;
+  queueLength: number;
+  createdAt: number;
+}
+
+export interface RoomCheckResult {
+  exists: boolean;
+  hasPassword: boolean;
+  name?: string;
 }
 
 export interface LyricLine {

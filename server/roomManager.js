@@ -1,5 +1,13 @@
 import { customAlphabet } from 'nanoid';
+import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
 import { fetchRandomSong } from './cyapi.js';
+import {
+  initRoomStorage,
+  isRedisEnabled,
+  loadAllRoomsFromStorage,
+  saveRoomToStorage,
+  deleteRoomFromStorage,
+} from './roomStorage.js';
 
 const generateRoomId = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const generateId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
@@ -9,6 +17,33 @@ const MAX_RANDOM_HISTORY = 200;
 const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
 
 const rooms = new Map();
+
+function hashPassword(password) {
+  const salt = randomBytes(16);
+  const hash = scryptSync(password, salt, 32);
+  return `${salt.toString('hex')}:${hash.toString('hex')}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored) return true;
+  if (!password) return false;
+  const [saltHex, hashHex] = stored.split(':');
+  if (!saltHex || !hashHex) return false;
+  const salt = Buffer.from(saltHex, 'hex');
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = scryptSync(password, salt, 32);
+  if (expected.length !== actual.length) return false;
+  return timingSafeEqual(expected, actual);
+}
+
+export function verifyRoomPassword(roomId, password) {
+  const room = rooms.get(roomId?.toUpperCase());
+  if (!room) return { ok: false, error: '房间不存在' };
+  if (!verifyPassword(password, room.passwordHash)) {
+    return { ok: false, error: '密码错误', needsPassword: true };
+  }
+  return { ok: true };
+}
 
 function cancelRoomDestroy(room) {
   if (room.destroyTimer) {
@@ -26,13 +61,89 @@ function scheduleRoomDestroy(roomId) {
     const current = rooms.get(roomId);
     if (current && current.users.size === 0) {
       rooms.delete(roomId);
+      void deleteRoomFromStorage(roomId);
     }
   }, ROOM_EMPTY_TTL_MS);
 }
 
-function createEmptyRoom(roomId) {
+function snapshotRoomForStorage(room) {
+  return {
+    id: room.id,
+    name: room.name,
+    passwordHash: room.passwordHash,
+    queue: room.queue,
+    current: room.current,
+    isPlaying: room.isPlaying,
+    currentTime: getPlaybackTime(room),
+    messages: room.messages.slice(-100),
+    randomPlayedKeys: Array.from(room.randomPlayedKeys),
+    nextRandom: room.nextRandom,
+    createdAt: room.createdAt,
+  };
+}
+
+function restoreRoomFromStorage(data) {
+  const room = createEmptyRoom(data.id, data.name, data.passwordHash ?? null);
+  room.queue = data.queue || [];
+  room.current = data.current ?? null;
+  room.isPlaying = Boolean(data.isPlaying);
+  room.currentTime = data.currentTime ?? 0;
+  room.messages = data.messages || [];
+  room.randomPlayedKeys = new Set(data.randomPlayedKeys || []);
+  room.nextRandom = data.nextRandom ?? null;
+  room.createdAt = data.createdAt ?? Date.now();
+
+  if (room.isPlaying && room.current) {
+    room.startedAt = Date.now() - room.currentTime * 1000;
+  }
+
+  return room;
+}
+
+function persistRoom(room) {
+  if (!room) return;
+  void saveRoomToStorage(snapshotRoomForStorage(room));
+}
+
+export async function initRooms() {
+  await initRoomStorage();
+  const stored = await loadAllRoomsFromStorage();
+
+  for (const data of stored) {
+    const room = restoreRoomFromStorage(data);
+    rooms.set(room.id, room);
+    if (room.users.size === 0) {
+      scheduleRoomDestroy(room.id);
+    }
+  }
+
+  if (stored.length > 0) {
+    console.log(`已从 Redis 恢复 ${stored.length} 个房间`);
+  }
+
+  if (isRedisEnabled()) {
+    setInterval(() => {
+      for (const room of rooms.values()) {
+        if (room.isPlaying || room.users.size > 0 || room.queue.length > 0) {
+          persistRoom(room);
+        }
+      }
+    }, 30000);
+  }
+}
+
+export { isRedisEnabled };
+
+function normalizeRoomName(name, roomId) {
+  const trimmed = String(name || '').trim();
+  return trimmed.slice(0, 30) || `房间 ${roomId}`;
+}
+
+function createEmptyRoom(roomId, name, passwordHash = null) {
   return {
     id: roomId,
+    name: normalizeRoomName(name, roomId),
+    passwordHash,
     ownerId: null,
     queue: [],
     current: null,
@@ -51,14 +162,37 @@ function createEmptyRoom(roomId) {
   };
 }
 
-export function createRoom() {
+export function createRoom({ name, password } = {}) {
   let roomId;
   do {
     roomId = generateRoomId();
   } while (rooms.has(roomId));
 
-  const room = createEmptyRoom(roomId);
+  const trimmed = String(password || '').trim();
+  const passwordHash = trimmed ? hashPassword(trimmed) : null;
+  const room = createEmptyRoom(roomId, name, passwordHash);
   rooms.set(roomId, room);
+  persistRoom(room);
+  return serializeRoom(room);
+}
+
+export function listRooms() {
+  return Array.from(rooms.values())
+    .map(serializeRoomSummary)
+    .sort((a, b) => b.userCount - a.userCount || b.createdAt - a.createdAt);
+}
+
+export function getRoomPublic(roomId) {
+  const room = rooms.get(roomId?.toUpperCase());
+  if (!room) return null;
+  if (room.passwordHash) {
+    return {
+      id: room.id,
+      name: room.name,
+      hasPassword: true,
+      userCount: room.users.size,
+    };
+  }
   return serializeRoom(room);
 }
 
@@ -87,6 +221,7 @@ export function addUser(roomId, socketId, nickname) {
     room.ownerId = socketId;
   }
 
+  persistRoom(room);
   return serializeRoom(room);
 }
 
@@ -97,6 +232,7 @@ export function removeUser(roomId, socketId) {
   room.users.delete(socketId);
 
   if (room.users.size === 0) {
+    persistRoom(room);
     scheduleRoomDestroy(roomId);
     return { empty: true };
   }
@@ -109,6 +245,7 @@ export function removeUser(roomId, socketId) {
   room.jumpRequests = room.jumpRequests.filter((r) => room.users.has(r.requestedBy));
   room.skipRequests = room.skipRequests.filter((r) => room.users.has(r.requestedBy));
 
+  persistRoom(room);
   return serializeRoom(room);
 }
 
@@ -151,6 +288,7 @@ export async function addToQueue(roomId, song, requestedBy) {
     await playNext(room);
   }
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -169,6 +307,7 @@ export function removeFromQueue(roomId, socketId, queueId) {
 
   room.queue = room.queue.filter((s) => s.queueId !== queueId);
   room.jumpRequests = room.jumpRequests.filter((r) => r.queueId !== queueId);
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -280,6 +419,7 @@ export async function ensurePlayback(roomId) {
   if (!room || room.current) return serializeRoom(room);
 
   await playNext(room);
+  persistRoom(room);
   return serializeRoom(room);
 }
 
@@ -289,6 +429,7 @@ export async function skipSong(roomId, socketId) {
   if (room.ownerId !== socketId) return { error: '仅房主可切歌' };
 
   await playNext(room);
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -307,6 +448,7 @@ export function setPlaying(roomId, socketId, isPlaying) {
     room.startedAt = null;
   }
 
+  persistRoom(room);
   return serializeRoom(room);
 }
 
@@ -317,6 +459,7 @@ export function seekTo(roomId, socketId, time) {
 
   room.currentTime = Math.max(0, time);
   room.startedAt = room.isPlaying ? Date.now() - room.currentTime * 1000 : null;
+  persistRoom(room);
   return serializeRoom(room);
 }
 
@@ -339,6 +482,7 @@ export function requestJump(roomId, socketId, queueId) {
     requestedAt: Date.now(),
   });
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -360,6 +504,7 @@ export async function approveJump(roomId, socketId, requestId) {
     await playNext(room);
   }
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -372,6 +517,7 @@ export function rejectJump(roomId, socketId, requestId) {
   room.jumpRequests = room.jumpRequests.filter((r) => r.id !== requestId);
   if (room.jumpRequests.length === before) return { error: '申请不存在' };
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -394,6 +540,7 @@ export function requestSkip(roomId, socketId) {
     requestedAt: Date.now(),
   });
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -408,6 +555,7 @@ export async function approveSkip(roomId, socketId, requestId) {
   room.skipRequests.splice(reqIdx, 1);
   await playNext(room);
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -420,6 +568,7 @@ export function rejectSkip(roomId, socketId, requestId) {
   room.skipRequests = room.skipRequests.filter((r) => r.id !== requestId);
   if (room.skipRequests.length === before) return { error: '申请不存在' };
 
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -445,6 +594,7 @@ export function addChatMessage(roomId, socketId, text) {
     room.messages.splice(0, room.messages.length - 100);
   }
 
+  persistRoom(room);
   return { message, room: serializeRoom(room) };
 }
 
@@ -456,9 +606,26 @@ export function getPlaybackTime(room) {
   return room.currentTime;
 }
 
+function serializeRoomSummary(room) {
+  return {
+    id: room.id,
+    name: room.name,
+    userCount: room.users.size,
+    hasPassword: Boolean(room.passwordHash),
+    isPlaying: room.isPlaying,
+    currentSong: room.current
+      ? { name: room.current.name, artist: room.current.artist }
+      : null,
+    queueLength: room.queue.length,
+    createdAt: room.createdAt,
+  };
+}
+
 function serializeRoom(room) {
   return {
     id: room.id,
+    name: room.name,
+    hasPassword: Boolean(room.passwordHash),
     ownerId: room.ownerId,
     queue: room.queue,
     current: room.current,
@@ -474,6 +641,11 @@ function serializeRoom(room) {
 
 export function getRoomInternal(roomId) {
   return rooms.get(roomId);
+}
+
+export function persistRoomById(roomId) {
+  const room = rooms.get(roomId);
+  if (room) persistRoom(room);
 }
 
 export function isOwner(room, socketId) {

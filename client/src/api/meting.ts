@@ -7,6 +7,7 @@ export {
   getCoverUrl,
   getSourceLabel,
   parseLrc,
+  listRooms,
   createRoom,
   checkRoom,
   getAvailableSources,

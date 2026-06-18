@@ -8,7 +8,13 @@ import { fileURLToPath } from 'url';
 import {
   createRoom,
   getRoom,
+  getRoomPublic,
+  listRooms,
+  verifyRoomPassword,
   roomExists,
+  initRooms,
+  isRedisEnabled,
+  persistRoomById,
   addUser,
   removeUser,
   addToQueue,
@@ -88,6 +94,7 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     metingApi: METING_API_URL,
     cyapi: isCyapiConfigured(),
+    redis: isRedisEnabled(),
   });
 });
 
@@ -209,13 +216,19 @@ app.get('/api/music/lrc-fallback', async (req, res) => {
   }
 });
 
-app.post('/api/rooms', (_req, res) => {
-  const room = createRoom();
+app.get('/api/rooms', (_req, res) => {
+  res.json(listRooms());
+});
+
+app.post('/api/rooms', (req, res) => {
+  const name = req.body?.name;
+  const password = req.body?.password;
+  const room = createRoom({ name, password });
   res.json(room);
 });
 
 app.get('/api/rooms/:id', (req, res) => {
-  const room = getRoom(req.params.id);
+  const room = getRoomPublic(req.params.id);
   if (!room) return res.status(404).json({ error: '房间不存在' });
   res.json(room);
 });
@@ -232,10 +245,16 @@ app.get('*', (req, res, next) => {
 const socketToRoom = new Map();
 
 io.on('connection', (socket) => {
-  socket.on('join_room', async ({ roomId, nickname }, callback) => {
+  socket.on('join_room', async ({ roomId, nickname, password }, callback) => {
     const id = roomId?.toUpperCase();
     if (!roomExists(id)) {
       callback?.({ success: false, error: '房间不存在' });
+      return;
+    }
+
+    const auth = verifyRoomPassword(id, password);
+    if (!auth.ok) {
+      callback?.({ success: false, error: auth.error, needsPassword: auth.needsPassword });
       return;
     }
 
@@ -492,6 +511,7 @@ io.on('connection', (socket) => {
 
     room.startedAt = Date.now() - time * 1000;
     room.currentTime = time;
+    persistRoomById(roomId);
   });
 
   socket.on('disconnect', () => {
@@ -523,8 +543,11 @@ setInterval(() => {
   }
 }, 250);
 
+await initRooms();
+
 httpServer.listen(PORT, () => {
   console.log(`🎵 OpenMusic 服务运行在 http://localhost:${PORT}`);
   console.log(`📡 Meting API: ${METING_API_URL}`);
   console.log(`🎤 Cyapi (QQ/酷狗): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
+  console.log(`💾 房间存储: ${isRedisEnabled() ? 'Redis' : '内存'}`);
 });

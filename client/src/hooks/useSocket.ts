@@ -135,7 +135,7 @@ export function useSocket() {
 
   const joinRoom = useCallback(
 
-    (roomId: string, nickname: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    (roomId: string, nickname: string, password?: string): Promise<{ success: boolean; error?: string; needsPassword?: boolean; room?: RoomState }> => {
 
       return new Promise((resolve) => {
 
@@ -147,13 +147,15 @@ export function useSocket() {
 
           'join_room',
 
-          { roomId, nickname },
+          { roomId, nickname, password: password?.trim() || undefined },
 
           (res: {
 
             success: boolean;
 
             error?: string;
+
+            needsPassword?: boolean;
 
             room?: RoomState;
 

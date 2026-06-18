@@ -1,4 +1,4 @@
-import type { MusicSource, SearchResult, Song } from '../../types';
+import type { MusicSource, RoomCheckResult, RoomSummary, SearchResult, Song } from '../../types';
 import type { MusicProviderMeta } from './types';
 import { providers, getAllSources } from './sources';
 import { interleaveSearchResults } from './merge';
@@ -143,15 +143,30 @@ export async function resolveDurationFromLyrics(
   return getDurationFromLrc(lrc, song.duration);
 }
 
-export async function createRoom(): Promise<{ id: string }> {
-  const res = await fetch('/api/rooms', { method: 'POST' });
+export async function createRoom(name?: string, password?: string): Promise<{ id: string; name: string }> {
+  const payload: { name?: string; password?: string } = {};
+  if (name?.trim()) payload.name = name.trim();
+  if (password?.trim()) payload.password = password.trim();
+  const res = await fetch('/api/rooms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
   if (!res.ok) throw new Error('创建房间失败');
   return res.json();
 }
 
-export async function checkRoom(id: string): Promise<boolean> {
+export async function listRooms(): Promise<RoomSummary[]> {
+  const res = await fetch('/api/rooms');
+  if (!res.ok) throw new Error('获取房间列表失败');
+  return res.json();
+}
+
+export async function checkRoom(id: string): Promise<RoomCheckResult> {
   const res = await fetch(`/api/rooms/${id}`);
-  return res.ok;
+  if (!res.ok) return { exists: false, hasPassword: false };
+  const data = await res.json();
+  return { exists: true, hasPassword: Boolean(data.hasPassword), name: data.name };
 }
 
 export async function getAvailableSources(): Promise<MusicProviderMeta[]> {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 import { Search, Loader2, Copy, Check, Crown, Tv, Plus } from 'lucide-react';
 
@@ -13,6 +13,7 @@ import type { MusicProviderMeta } from '../api/music/types';
 import { useRoomStore } from '../stores/roomStore';
 
 import { useSocket } from '../hooks/useSocket';
+import { createRandomNickname } from '../lib/randomNickname';
 
 import { songKey } from '../api/music';
 
@@ -42,7 +43,11 @@ export default function Room() {
 
   const navigate = useNavigate();
 
-  const { nickname, room, showPlayer, setShowPlayer, isOwner } = useRoomStore();
+  const location = useLocation();
+
+  const roomPassword = (location.state as { password?: string } | null)?.password;
+
+  const { nickname, room, showPlayer, setShowPlayer, isOwner, setNickname } = useRoomStore();
 
   const { joinRoom, addSong, leaveRoom } = useSocket();
 
@@ -72,6 +77,14 @@ export default function Room() {
 
   const closeToast = useCallback(() => setToast(null), []);
 
+  const ensuredNickname = useCallback(() => {
+    const trimmed = nickname.trim();
+    if (trimmed) return trimmed;
+    const generated = createRandomNickname();
+    setNickname(generated);
+    return generated;
+  }, [nickname, setNickname]);
+
 
 
   useEffect(() => {
@@ -86,7 +99,7 @@ export default function Room() {
 
     if (!roomId) return;
 
-    joinRoom(roomId, nickname).then((res) => {
+    joinRoom(roomId, ensuredNickname(), roomPassword).then((res) => {
 
       if (!res.success) {
 
@@ -102,7 +115,7 @@ export default function Room() {
       leaveRoom();
     };
 
-  }, [roomId, nickname, joinRoom, leaveRoom, navigate]);
+  }, [roomId, ensuredNickname, roomPassword, joinRoom, leaveRoom, navigate]);
 
 
 
@@ -252,7 +265,7 @@ export default function Room() {
 
                 <h1 className="text-base sm:text-lg font-semibold truncate">
 
-                  房间 <span className="text-netease-red">{room.id}</span>
+                  <span className="truncate">{room.name}</span>
 
                 </h1>
 
@@ -269,6 +282,10 @@ export default function Room() {
                 )}
 
               </div>
+
+              <p className="text-xs text-netease-muted mt-0.5">
+                房间号 <span className="text-netease-red">{room.id}</span>
+              </p>
 
               <p className="text-xs text-netease-muted">{room.userCount} 人在线</p>
 
