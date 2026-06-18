@@ -7,7 +7,7 @@ import { useAudioStore } from '../stores/audioStore';
 
 import type { ChatMessage, RoomState, Song } from '../types';
 
-import { stopSharedAudio } from '../lib/audioElement';
+import { stopSharedAudio, getSharedAudio } from '../lib/audioElement';
 
 
 
@@ -54,17 +54,27 @@ export function useSocket() {
 
 
     const onRoomUpdate = (room: RoomState) => {
+      const { mySocketId, room: prevRoom } = useRoomStore.getState();
+      const isOwner = Boolean(mySocketId && room.ownerId === mySocketId);
 
-      setRoom(room);
-
-      const { mySocketId } = useRoomStore.getState();
-
-      if (mySocketId) {
-
-        setConnectionInfo(mySocketId, room.ownerId === mySocketId);
-
+      let merged = room;
+      if (
+        isOwner
+        && room.isPlaying
+        && room.current
+        && prevRoom?.current?.queueId === room.current.queueId
+      ) {
+        const audio = getSharedAudio();
+        if (audio.src && isFinite(audio.currentTime) && audio.currentTime > 0) {
+          merged = { ...room, currentTime: audio.currentTime };
+        }
       }
 
+      setRoom(merged);
+
+      if (mySocketId) {
+        setConnectionInfo(mySocketId, room.ownerId === mySocketId);
+      }
     };
 
 

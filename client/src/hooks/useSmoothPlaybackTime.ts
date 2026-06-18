@@ -16,11 +16,19 @@ export function useSmoothPlaybackTime(): number {
 
   const [smoothTime, setSmoothTime] = useState(roomTime);
   const anchorRef = useRef({ time: roomTime, at: Date.now() });
+  const lastTrackKeyRef = useRef('');
 
   useEffect(() => {
+    const trackKey = current ? `${current.queueId}:${current.id}` : '';
+    const trackChanged = trackKey !== lastTrackKeyRef.current;
+    lastTrackKeyRef.current = trackKey;
+
+    // 房主播放中：新用户加入会触发 room_update，不要用服务端时间覆盖进度条
+    if (isOwner && isPlaying && !trackChanged) return;
+
     anchorRef.current = { time: roomTime, at: Date.now() };
     setSmoothTime(roomTime);
-  }, [roomTime, current?.queueId, current?.id]);
+  }, [roomTime, current?.queueId, current?.id, isOwner, isPlaying]);
 
   useEffect(() => {
     if (!isPlaying) {

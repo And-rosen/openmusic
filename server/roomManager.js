@@ -621,7 +621,14 @@ function serializeRoomSummary(room) {
   };
 }
 
+function repairPlaybackClock(room) {
+  if (room.isPlaying && room.current && !room.startedAt) {
+    room.startedAt = Date.now() - (room.currentTime || 0) * 1000;
+  }
+}
+
 function serializeRoom(room) {
+  repairPlaybackClock(room);
   return {
     id: room.id,
     name: room.name,

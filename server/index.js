@@ -508,6 +508,7 @@ io.on('connection', (socket) => {
 
     const room = getRoomInternal(roomId);
     if (!room || !room.isPlaying) return;
+    if (room.ownerId !== socket.id) return;
 
     room.startedAt = Date.now() - time * 1000;
     room.currentTime = time;

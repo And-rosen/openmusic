@@ -47,6 +47,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const tvMode = options.tvMode ?? false;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const room = useRoomStore((s) => s.room);
+  const isOwner = useRoomStore((s) => s.isOwner);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const setLrcDuration = useAudioStore((s) => s.setLrcDuration);
   const setMediaDuration = useAudioStore((s) => s.setMediaDuration);
@@ -171,7 +172,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const result = await playAudio(audio);
     if (result === 'played') {
       setNeedsAudioUnlock(false);
-      if (liveRoom.isPlaying || fromUserGesture) {
+      if (useRoomStore.getState().isOwner && (liveRoom.isPlaying || fromUserGesture)) {
         syncTime(audio.currentTime);
         lastSyncAt.current = Date.now();
       }
@@ -199,6 +200,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
 
     const trackKey = trackKeyOf(current);
+    const shouldDriveAudio = isOwner || tvMode;
+
+    if (!shouldDriveAudio) {
+      setTrackLoading(false);
+      return;
+    }
+
     const needsLoad = readyTrackKey.current !== trackKey;
 
     const loadAndPlay = async () => {
@@ -266,8 +274,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (liveRoom.isPlaying) {
           const result = await playAudio(audio);
           if (result === 'played') {
-            syncTime(audio.currentTime);
-            lastSyncAt.current = Date.now();
+            if (useRoomStore.getState().isOwner) {
+              syncTime(audio.currentTime);
+              lastSyncAt.current = Date.now();
+            }
             setNeedsAudioUnlock(false);
           } else if (result === 'blocked') {
             setNeedsAudioUnlock(true);
@@ -289,6 +299,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     room?.current?.id,
     room?.current?.queueId,
     room?.current?.source,
+    isOwner,
+    tvMode,
     initAudio,
     requestSkip,
     syncTime,
@@ -302,7 +314,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   useEffect(() => {
     const audio = audioRef.current;
     const current = room?.current;
-    if (!audio || !current) return;
+    if (!audio || !current || (!isOwner && !tvMode)) return;
 
     const trackKey = trackKeyOf(current);
     if (readyTrackKey.current !== trackKey) return;
@@ -372,23 +384,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       document.removeEventListener('touchstart', unlock, { capture: true });
     };
   }, [tvMode, needsAudioUnlock]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    const current = room?.current;
-    if (!audio || !current) return;
-
-    const trackKey = trackKeyOf(current);
-    if (readyTrackKey.current !== trackKey) return;
-
-    const target = room.currentTime ?? 0;
-    if (Math.abs(target - audio.currentTime) <= 2) return;
-
-    syncing.current = true;
-    const dur = audio.duration;
-    audio.currentTime = capSeekTime(target, current, dur);
-    setTimeout(() => { syncing.current = false; }, 300);
-  }, [room?.currentTime, room?.current?.queueId, room?.current?.id, room?.current?.source]);
 
   useEffect(() => {
     const current = room?.current;

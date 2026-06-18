@@ -47,7 +47,7 @@ export default function Room() {
 
   const roomPassword = (location.state as { password?: string } | null)?.password;
 
-  const { nickname, room, showPlayer, setShowPlayer, isOwner, setNickname } = useRoomStore();
+  const { room, showPlayer, setShowPlayer, isOwner } = useRoomStore();
 
   const { joinRoom, addSong, leaveRoom } = useSocket();
 
@@ -77,47 +77,30 @@ export default function Room() {
 
   const closeToast = useCallback(() => setToast(null), []);
 
-  const ensuredNickname = useCallback(() => {
-    const trimmed = nickname.trim();
-    if (trimmed) return trimmed;
-    const generated = createRandomNickname();
-    setNickname(generated);
-    return generated;
-  }, [nickname, setNickname]);
-
-
-
   useEffect(() => {
-
-    getAvailableSources().then(setSources);
-
-  }, []);
-
-
-
-  useEffect(() => {
-
     if (!roomId) return;
 
-    joinRoom(roomId, ensuredNickname(), roomPassword).then((res) => {
+    let nick = useRoomStore.getState().nickname.trim();
+    if (!nick) {
+      nick = createRandomNickname();
+      useRoomStore.getState().setNickname(nick);
+    }
 
+    joinRoom(roomId, nick, roomPassword).then((res) => {
       if (!res.success) {
-
         setJoinError(res.error || '加入房间失败');
-
         setTimeout(() => navigate('/'), 2000);
-
       }
-
     });
 
     return () => {
       leaveRoom();
     };
+  }, [roomId, roomPassword, joinRoom, leaveRoom, navigate]);
 
-  }, [roomId, ensuredNickname, roomPassword, joinRoom, leaveRoom, navigate]);
-
-
+  useEffect(() => {
+    getAvailableSources().then(setSources);
+  }, []);
 
   const doSearch = useCallback(async (keyword: string, dedupe = dedupeCrossSource) => {
 
