@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './loadEnv.js';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -521,7 +521,7 @@ setInterval(() => {
 
     io.to(roomId).emit('playback_tick', state);
   }
-}, 1000);
+}, 250);
 
 httpServer.listen(PORT, () => {
   console.log(`🎵 OpenMusic 服务运行在 http://localhost:${PORT}`);

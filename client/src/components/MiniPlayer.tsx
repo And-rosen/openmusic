@@ -6,6 +6,7 @@ import { useSocket } from '../hooks/useSocket';
 
 import { formatDuration, getCoverUrl } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
+import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 
 import SourceBadge from './SourceBadge';
 
@@ -76,7 +77,8 @@ export default function MiniPlayer({ onExpand }: Props) {
 
 
 
-  const { current, isPlaying, currentTime } = room;
+  const { current, isPlaying } = room;
+  const currentTime = useSmoothPlaybackTime();
   const duration = useTrackDuration(current);
 
   const displayTime = clampPlaybackTime(currentTime, duration);

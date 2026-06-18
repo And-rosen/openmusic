@@ -96,9 +96,9 @@ export default function Lyrics({ lines, currentTime, onSeek, variant = 'center',
               key={`${line.time}-${realIndex}`}
               ref={isActive ? activeRef : undefined}
               onClick={() => onSeek?.(line.time)}
-              className={`transition-all duration-500 cursor-pointer ${
-                isSide ? 'text-left' : 'text-center'
-              } ${
+              className={`cursor-pointer ${
+                isActive || isPast ? 'transition-none' : 'transition-colors duration-150'
+              } ${isSide ? 'text-left' : 'text-center'} ${
                 isActive
                   ? isSide
                     ? activeSideCls

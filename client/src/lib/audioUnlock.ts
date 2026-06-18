@@ -33,6 +33,12 @@ export function isTvPage(): boolean {
   return /^\/tv\//.test(window.location.pathname);
 }
 
+/** 须在 click/touch 回调中同步调用，否则 iOS Safari 会丢失用户手势导致 play() 被拒 */
+export function playInUserGesture(audio: HTMLAudioElement): void {
+  if (!audio.src) return;
+  void audio.play().catch(() => {});
+}
+
 export async function tryPlay(audio: HTMLAudioElement): Promise<PlayResult> {
   try {
     await audio.play();

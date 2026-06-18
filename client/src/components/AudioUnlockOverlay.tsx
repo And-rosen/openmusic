@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Volume2 } from 'lucide-react';
 import { useAudioStore } from '../stores/audioStore';
 import { useRoomStore } from '../stores/roomStore';
@@ -12,17 +13,22 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
   const needsAudioUnlock = useAudioStore((s) => s.needsAudioUnlock);
   const retryPlayback = useAudioStore((s) => s.retryPlayback);
   const room = useRoomStore((s) => s.room);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const handlingRef = useRef(false);
 
   useEffect(() => {
-    if (!needsAudioUnlock || !room?.current) return;
-    buttonRef.current?.focus();
-  }, [needsAudioUnlock, room?.current]);
+    setMounted(true);
+  }, []);
 
-  if (!needsAudioUnlock || !room?.current) return null;
+  if (!needsAudioUnlock || !room?.current || !mounted) return null;
 
   const handleUnlock = () => {
+    if (handlingRef.current) return;
+    handlingRef.current = true;
     retryPlayback?.(true);
+    window.setTimeout(() => {
+      handlingRef.current = false;
+    }, 400);
   };
 
   const hint = tvMode
@@ -31,19 +37,16 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
       ? '微信内需点击授权后才能播放'
       : '浏览器限制自动播放，点击屏幕开启声音';
 
-  return (
+  return createPortal(
     <button
-      ref={buttonRef}
       type="button"
       onClick={handleUnlock}
-      onTouchEnd={(e) => {
-        e.preventDefault();
-        handleUnlock();
-      }}
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm animate-fade-in"
+      onTouchStart={handleUnlock}
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 touch-manipulation cursor-pointer"
+      style={{ WebkitTapHighlightColor: 'transparent' }}
       aria-label="开启声音"
     >
-      <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-netease-card/90 border border-netease-border/60 shadow-2xl pointer-events-none">
+      <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-netease-card border border-netease-border/60 shadow-2xl pointer-events-none select-none">
         <div className="w-14 h-14 rounded-full bg-netease-red/20 flex items-center justify-center">
           <Volume2 className="w-7 h-7 text-netease-red" />
         </div>
@@ -52,6 +55,7 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
         </p>
         <p className="text-xs text-netease-muted text-center max-w-[16rem]">{hint}</p>
       </div>
-    </button>
+    </button>,
+    document.body,
   );
 }

@@ -5,6 +5,7 @@ import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
+import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import {
   getLyrics, parseLrc, formatDuration, getCoverUrl,
   getLrcFallbackDurationMs, getTrackKey,
@@ -55,7 +56,7 @@ export default function TvDisplay() {
 
   const current = room?.current;
   const isPlaying = room?.isPlaying ?? false;
-  const currentTime = room?.currentTime ?? 0;
+  const currentTime = useSmoothPlaybackTime();
   const duration = useTrackDuration(current ?? null);
   const displayTime = clampPlaybackTime(currentTime, duration);
   const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;

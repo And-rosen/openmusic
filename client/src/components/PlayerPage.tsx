@@ -10,6 +10,7 @@ import { useSocket } from '../hooks/useSocket';
 
 import { getLyrics, parseLrc, formatDuration, getCoverUrl, getLrcFallbackDurationMs, getTrackKey } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
+import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 
 import type { LyricLine } from '../types';
 
@@ -54,7 +55,7 @@ export default function PlayerPage({ onClose }: Props) {
 
   const isPlaying = room?.isPlaying ?? false;
 
-  const currentTime = room?.currentTime ?? 0;
+  const currentTime = useSmoothPlaybackTime();
 
   const duration = useTrackDuration(current ?? null);
   const displayTime = clampPlaybackTime(currentTime, duration);

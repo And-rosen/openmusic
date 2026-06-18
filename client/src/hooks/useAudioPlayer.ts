@@ -6,7 +6,7 @@ import { getLyrics, getLrcFallbackDurationMs, getTrackKey } from '../api/music';
 import { resolveTrackDurationSeconds } from '../hooks/useTrackDuration';
 import type { QueueItem } from '../types';
 import { getSharedAudio } from '../lib/audioElement';
-import { onWeChatBridgeReady, tryPlayWithAutoplayFallback } from '../lib/audioUnlock';
+import { onWeChatBridgeReady, playInUserGesture, tryPlayWithAutoplayFallback } from '../lib/audioUnlock';
 import { prefetchQueueSongs, rememberSongUrl, resolveSongUrl } from '../lib/songPreloadCache';
 
 let audioListenersAttached = false;
@@ -162,6 +162,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (!liveRoom.isPlaying && !fromUserGesture) {
       setNeedsAudioUnlock(false);
       return;
+    }
+
+    if (fromUserGesture) {
+      playInUserGesture(audio);
     }
 
     const result = await playAudio(audio);
