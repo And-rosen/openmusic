@@ -1,4 +1,5 @@
 import type { MusicProvider, SearchResult } from '../types';
+import { fetchWithTimeout } from '../../http';
 
 const API_BASE = '/api/music/cyapi';
 
@@ -46,7 +47,7 @@ export const tencentCyapiProvider: Pick<MusicProvider, 'search' | 'getSongById' 
   async search(keyword) {
     if (!keyword.trim()) return [];
     const params = new URLSearchParams({ q: keyword.trim(), num: '15' });
-    const res = await fetch(`${API_BASE}/search?${params}`);
+    const res = await fetchWithTimeout(`${API_BASE}/search?${params}`);
     if (!res.ok) return [];
     const data = await res.json() as CyapiSong[];
     if (!Array.isArray(data)) return [];
@@ -60,7 +61,7 @@ export const tencentCyapiProvider: Pick<MusicProvider, 'search' | 'getSongById' 
   async getSongUrl(song) {
     if (song.url?.startsWith('http')) return song.url;
     const query = new URLSearchParams({ server: 'tencent', type: 'url', id: song.id });
-    const res = await fetch(`/api/meting?${query}`, { redirect: 'follow' });
+    const res = await fetchWithTimeout(`/api/meting?${query}`, { redirect: 'follow' });
     const text = await res.text();
     if (text.startsWith('@')) return text.slice(1);
     if (text.startsWith('http')) return text;
@@ -70,7 +71,7 @@ export const tencentCyapiProvider: Pick<MusicProvider, 'search' | 'getSongById' 
   async getLyrics(song) {
     if (song.lrc?.startsWith('[')) return song.lrc;
     const query = new URLSearchParams({ server: 'tencent', type: 'lrc', id: song.id });
-    const res = await fetch(`/api/meting?${query}`);
+    const res = await fetchWithTimeout(`/api/meting?${query}`);
     return res.text();
   },
 

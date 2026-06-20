@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import { formatDuration, getCoverUrl } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
+import { getSharedAudio } from '../lib/audioElement';
 
 import SourceBadge from './SourceBadge';
 
@@ -47,6 +48,10 @@ export default function MiniPlayer({ onExpand }: Props) {
   const handlePlayPause = () => {
     if (!room) return;
     const next = !room.isPlaying;
+    if (!next) {
+      getSharedAudio().pause();
+      useRoomStore.getState().setRoom({ ...room, isPlaying: false });
+    }
     togglePlay(next);
     if (next) useAudioStore.getState().retryPlayback?.(true);
   };
@@ -143,6 +148,9 @@ export default function MiniPlayer({ onExpand }: Props) {
             <p className="text-[11px] sm:text-xs text-netease-muted truncate">
 
               {current.artist}
+              {current.requestedBy && (
+                <span className="text-netease-muted/70"> · {current.requestedBy}点的歌</span>
+              )}
 
             </p>
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv, Plus } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, Tv, LogOut } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources } from '../api/music';
 
@@ -30,11 +30,34 @@ import AudioEngine from '../components/AudioEngine';
 import SongResultList from '../components/SongResultList';
 import SearchSkeleton from '../components/SearchSkeleton';
 import ChatPanel from '../components/ChatPanel';
+import HotSongPanel from '../components/HotSongPanel';
 
 import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
 import { copyToClipboard } from '../lib/copyToClipboard';
 
+
+function roomPasswordKey(roomId: string) {
+  return `openmusic:room-password:${roomId.toUpperCase()}`;
+}
+
+function getStoredRoomPassword(roomId: string | undefined) {
+  if (!roomId) return undefined;
+  try {
+    return sessionStorage.getItem(roomPasswordKey(roomId)) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberRoomPassword(roomId: string, password?: string) {
+  if (!password?.trim()) return;
+  try {
+    sessionStorage.setItem(roomPasswordKey(roomId), password.trim());
+  } catch {
+    // sessionStorage may be unavailable in private browsing.
+  }
+}
 
 
 export default function Room() {
@@ -45,7 +68,7 @@ export default function Room() {
 
   const location = useLocation();
 
-  const roomPassword = (location.state as { password?: string } | null)?.password;
+  const roomPassword = (location.state as { password?: string } | null)?.password || getStoredRoomPassword(roomId);
 
   const { room, showPlayer, setShowPlayer, isOwner } = useRoomStore();
 
@@ -68,8 +91,9 @@ export default function Room() {
   const [copied, setCopied] = useState(false);
   const [tvCopied, setTvCopied] = useState(false);
   const [searchedKeyword, setSearchedKeyword] = useState('');
-  const [dedupeCrossSource, setDedupeCrossSource] = useState(false);
+  const [dedupeCrossSource, setDedupeCrossSource] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [hotRefreshKey, setHotRefreshKey] = useState(0);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -79,6 +103,8 @@ export default function Room() {
 
   useEffect(() => {
     if (!roomId) return;
+    let cancelled = false;
+    let redirectTimer: number | undefined;
 
     let nick = useRoomStore.getState().nickname.trim();
     if (!nick) {
@@ -87,14 +113,20 @@ export default function Room() {
     }
 
     joinRoom(roomId, nick, roomPassword).then((res) => {
+      if (cancelled) return;
       if (!res.success) {
         setJoinError(res.error || '加入房间失败');
-        setTimeout(() => navigate('/'), 2000);
+        redirectTimer = window.setTimeout(() => navigate('/'), 2000);
+        return;
       }
+
+      rememberRoomPassword(roomId, roomPassword);
     });
 
     return () => {
-      leaveRoom();
+      cancelled = true;
+      if (redirectTimer) window.clearTimeout(redirectTimer);
+      // 刷新/关闭页面时不主动 leave，避免房间被暂停；依赖 socket 断开与重连
     };
   }, [roomId, roomPassword, joinRoom, leaveRoom, navigate]);
 
@@ -155,6 +187,7 @@ export default function Room() {
     setAddingId(null);
     if (res.success) {
       showToast('点歌成功', 'success');
+      setHotRefreshKey((k) => k + 1);
     } else if (res.error) {
       showToast(res.error, 'error');
     }
@@ -238,7 +271,7 @@ export default function Room() {
 
       <header className="glass flex-shrink-0 z-30 border-b border-netease-border/50 px-3 sm:px-4 py-2.5 sm:py-3 safe-top">
 
-        <div className="max-w-6xl mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="max-w-7xl mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
 
           <div className="flex items-center justify-between gap-2 min-w-0">
 
@@ -276,7 +309,7 @@ export default function Room() {
 
             <div className="sm:hidden flex-shrink-0">
 
-              <OnlineUsers users={room.users} ownerId={room.ownerId} />
+              <OnlineUsers users={room.users} ownerId={room.ownerId} creatorId={room.creatorId} />
 
             </div>
 
@@ -324,17 +357,17 @@ export default function Room() {
                   navigate('/');
                 }}
                 className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
-                title="创建房间"
+                title="退出房间"
               >
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">创建房间</span>
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">退出房间</span>
               </button>
 
             </div>
 
             <div className="hidden sm:block">
 
-              <OnlineUsers users={room.users} ownerId={room.ownerId} />
+              <OnlineUsers users={room.users} ownerId={room.ownerId} creatorId={room.creatorId} />
 
             </div>
 
@@ -346,12 +379,20 @@ export default function Room() {
 
 
 
-      <div className="flex-1 min-h-0 max-w-6xl mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden">
+      <div className="flex-1 min-h-0 max-w-7xl mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden">
 
-        <div className="flex flex-col lg:grid lg:grid-cols-[1fr_320px] lg:h-full lg:min-h-0 gap-3 lg:gap-6">
+        <div className="flex flex-col lg:grid lg:grid-cols-[240px_1fr_300px] lg:h-full lg:min-h-0 gap-3 lg:gap-4">
 
-          {/* 点歌搜索 — 手机端最上 */}
+          {/* 点歌热榜 — 桌面左侧 */}
+          <div className="hidden lg:flex flex-col order-0 lg:min-h-0 lg:overflow-hidden">
+            <HotSongPanel addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
+          </div>
+
+          {/* 点歌搜索 — 中间；手机端热榜在上方 */}
           <div className="min-w-0 order-1 flex flex-col lg:min-h-0 lg:overflow-hidden">
+            <div className="lg:hidden mb-3">
+              <HotSongPanel compact addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
+            </div>
             <JumpRequestBanner />
 
             <div className="flex gap-2 mb-2">
@@ -364,7 +405,7 @@ export default function Room() {
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   placeholder="搜索歌曲、歌手..."
                   className={`w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors ${
-                    searchableCount > 0 ? 'pr-[6.75rem] sm:pr-[7.25rem]' : 'pr-4'
+                    searchableCount > 0 ? 'pr-[8.25rem] sm:pr-[8.75rem]' : 'pr-4'
                   }`}
                 />
                 {searchableCount > 0 && (
@@ -374,7 +415,7 @@ export default function Room() {
                         dedupeCrossSource ? 'text-white/80' : 'text-netease-muted'
                       }`}
                     >
-                      去重
+                      智能去重
                     </span>
                     <button
                       type="button"
@@ -440,7 +481,7 @@ export default function Room() {
             </div>
           </div>
 
-          {/* 播放队列 + 聊天室 — 手机端在点歌下方 */}
+          {/* 播放队列 + 聊天室 — 右侧 */}
           <div className="order-2 flex flex-col gap-3 lg:self-stretch lg:min-h-0">
             <div className="bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden flex flex-col flex-shrink-0">
               <div className="flex items-center justify-between px-4 py-2.5 sm:py-3 border-b border-netease-border/50 flex-shrink-0">
@@ -467,11 +508,20 @@ export default function Room() {
 
 
 
-      {room.current && (
+      {room.current ? (
 
         <MiniPlayer onExpand={() => setShowPlayer(true)} />
 
-      )}
+      ) : room.randomLoading ? (
+
+        <div className="fixed bottom-0 left-0 right-0 z-40 glass border-t border-netease-border/50 pb-[env(safe-area-inset-bottom,0px)]">
+          <div className="max-w-5xl mx-auto flex items-center gap-3 px-3 sm:px-4 py-3.5 sm:py-4">
+            <Loader2 className="w-5 h-5 text-netease-red animate-spin flex-shrink-0" />
+            <p className="text-sm text-netease-muted">正在加载随机歌曲...</p>
+          </div>
+        </div>
+
+      ) : null}
 
 
 

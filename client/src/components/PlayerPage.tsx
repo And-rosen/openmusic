@@ -11,6 +11,7 @@ import { useSocket } from '../hooks/useSocket';
 import { getLyrics, parseLrc, formatDuration, getCoverUrl, getLrcFallbackDurationMs, getTrackKey } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
+import { getSharedAudio } from '../lib/audioElement';
 
 import type { LyricLine } from '../types';
 
@@ -67,6 +68,10 @@ export default function PlayerPage({ onClose }: Props) {
 
   const handlePlayPause = () => {
     const next = !isPlaying;
+    if (!next && room) {
+      getSharedAudio().pause();
+      useRoomStore.getState().setRoom({ ...room, isPlaying: false });
+    }
     togglePlay(next);
     if (next) useAudioStore.getState().retryPlayback?.(true);
   };

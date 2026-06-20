@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Volume2 } from 'lucide-react';
 import { useAudioStore } from '../stores/audioStore';
 import { useRoomStore } from '../stores/roomStore';
-import { isWeChatBrowser } from '../lib/audioUnlock';
+import { isWeChatBrowser, markAudioSessionUnlocked, shouldShowUnlockOverlay, isMobileDevice } from '../lib/audioUnlock';
 
 interface Props {
   tvMode?: boolean;
@@ -20,15 +20,22 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
     setMounted(true);
   }, []);
 
-  if (!needsAudioUnlock || !room?.current || !mounted) return null;
+  if (!needsAudioUnlock || !room?.current || !mounted || !shouldShowUnlockOverlay()) return null;
 
   const handleUnlock = () => {
     if (handlingRef.current) return;
     handlingRef.current = true;
+    markAudioSessionUnlocked();
+    useAudioStore.getState().setNeedsAudioUnlock(false);
     retryPlayback?.(true);
     window.setTimeout(() => {
       handlingRef.current = false;
     }, 400);
+  };
+
+  const handlePointerUnlock = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    handleUnlock();
   };
 
   const hint = tvMode
@@ -40,9 +47,9 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
   return createPortal(
     <button
       type="button"
-      onClick={handleUnlock}
-      onTouchStart={handleUnlock}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 touch-manipulation cursor-pointer"
+      onClick={!isMobileDevice() ? handlePointerUnlock : undefined}
+      onTouchStart={isMobileDevice() ? handlePointerUnlock : undefined}
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 touch-manipulation cursor-pointer animate-fade-in"
       style={{ WebkitTapHighlightColor: 'transparent' }}
       aria-label="开启声音"
     >

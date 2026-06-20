@@ -1,4 +1,5 @@
 import type { MusicProvider, SearchResult } from '../types';
+import { fetchWithTimeout } from '../../http';
 
 interface KugouListItem {
   id: string;
@@ -32,7 +33,7 @@ function normalizeKugou(raw: KugouListItem): SearchResult {
 }
 
 async function fetchKugouDetail(id: string): Promise<KugouDetail | null> {
-  const res = await fetch(`/api/music/cyapi/kugou/song?id=${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(`/api/music/cyapi/kugou/song?id=${encodeURIComponent(id)}`);
   if (!res.ok) return null;
   return res.json();
 }
@@ -48,7 +49,7 @@ export const kugouProvider: MusicProvider = {
   async search(keyword) {
     if (!keyword.trim()) return [];
     const params = new URLSearchParams({ q: keyword.trim(), num: '15' });
-    const res = await fetch(`/api/music/cyapi/kugou/search?${params}`);
+    const res = await fetchWithTimeout(`/api/music/cyapi/kugou/search?${params}`);
     if (!res.ok) return [];
     const data = await res.json() as KugouListItem[];
     if (!Array.isArray(data)) return [];

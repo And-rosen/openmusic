@@ -56,7 +56,7 @@ npm run build          # 构建前端 → client/dist
 # 或 npm run package:build  # 一键打包部署目录 + release/openmusic-build.zip
 
 cp server/.env.example server/.env
-# 编辑 server/.env，至少配置 METING_API_URL 和 METING_API_AUTH
+# 生产环境至少配置 CLIENT_URL、CLIENT_ID_SECRET、METING_API_URL
 
 npm start              # 默认 http://服务器IP:4000
 ```
@@ -69,7 +69,7 @@ npm run build          # 构建前端 → client/dist
 # 或 npm run package:build
 ```
 
-在 `server/`、`client/dist/`、`deploy/` 上传到服务器前，**生产环境建议配置 Redis**，避免发版重启后房间全部丢失。详细步骤见 [deploy/DEPLOY-BAOTA.md](deploy/DEPLOY-BAOTA.md)。
+上传 `server/`、`client/dist/`、`deploy/` 前，建议配置 Redis，避免重启后房间丢失。PM2 请保持单实例运行。详细步骤见 [deploy/DEPLOY-BAOTA.md](deploy/DEPLOY-BAOTA.md)。
 
 ### 打包命令
 
@@ -103,23 +103,28 @@ location /socket.io/ {
 | 变量 | 必填 | 说明 |
 |------|:----:|------|
 | `PORT` | | 服务端口，默认 `4000` |
-| `CLIENT_URL` | | 前端地址（CORS），如 `https://your-domain.com` |
-| `METING_API_URL` | ✅ | Meting-API 地址，如 `http://127.0.0.1:3000` |
+| `CLIENT_URL` | 生产必填 | 前端地址，如 `https://music.example.com`；生产未配置会拒绝浏览器跨域请求 |
+| `CLIENT_ID_SECRET` | 生产必填 | 会话签名密钥，填一段长随机字符串，重启后不要变化 |
+| `METING_API_URL` | 必填 | Meting-API 地址，如 `http://127.0.0.1:3000` |
 | `METING_API_AUTH` | 推荐 | Meting 的 `auth` 令牌 |
-| `CYAPI_BASE` | | 迟言 API 根地址，默认 `https://cyapi.top/API` |
-| `CYAPI_KEY` | 可选 | 迟言 `apikey`；QQ 搜索、酷狗、队列为空随机推荐 |
-| `VMY_LRC_URL` | | 歌词备用接口（按歌名），默认 `https://api.52vmy.cn/api/music/lrc` |
-| `REDIS_URL` | 可选 | Redis 连接串，如 `redis://127.0.0.1:6379/0`；与下方分项配置二选一 |
-| `REDIS_HOST` | 可选 | Redis 地址；配置 `REDIS_URL` 或 `REDIS_HOST` 之一即启用持久化 |
+| `CYAPI_KEY` | 可选 | 迟言 API Key，用于 QQ / 酷狗 / 随机推荐 |
+| `CYAPI_BASE` | 可选 | 迟言 API 根地址，默认 `https://cyapi.top/API` |
+| `VMY_LRC_URL` | 可选 | 歌词备用接口，默认已内置 |
+| `REDIS_URL` | 可选 | Redis 连接串；配置后启用房间持久化 |
+| `REDIS_HOST` | 可选 | Redis 地址；与 `REDIS_URL` 二选一 |
 | `REDIS_PORT` | | 端口，默认 `6379` |
 | `REDIS_USERNAME` | | 用户名，无则留空 |
 | `REDIS_PASSWORD` | | 密码，无则留空 |
 | `REDIS_DB` | | 数据库编号，默认 `0` |
+| `TRUST_PROXY` | 可选 | Nginx/宝塔反代后设为 `1`，限流等功能使用真实客户端 IP |
 
-**最小配置（仅网易云）：**
+**生产最小配置（仅网易云）：**
 
 ```env
 PORT=4000
+CLIENT_URL=https://music.example.com
+CLIENT_ID_SECRET=换成一段长随机字符串
+TRUST_PROXY=1
 METING_API_URL=http://127.0.0.1:3000
 METING_API_AUTH=你的meting_token
 ```
@@ -129,9 +134,10 @@ METING_API_AUTH=你的meting_token
 ```env
 PORT=4000
 CLIENT_URL=https://your-domain.com
+CLIENT_ID_SECRET=换成一段长随机字符串
+TRUST_PROXY=1
 METING_API_URL=http://127.0.0.1:3000
 METING_API_AUTH=你的meting_token
-CYAPI_BASE=https://cyapi.top/API
 CYAPI_KEY=你的迟言apikey
 ```
 
@@ -153,7 +159,7 @@ REDIS_DB=0
 # REDIS_PASSWORD=你的密码
 ```
 
-配置后，房间歌单、播放进度、密码等会在 Redis 中持久化，服务更新或重启后可自动恢复。未配置 Redis 时行为与原来一致，仅使用内存存储。
+配置 Redis 后，房间歌单、播放进度、密码等会持久化。未配置 Redis 时仅使用内存，服务重启后房间会丢失。
 
 ### 房间 API
 
@@ -168,10 +174,8 @@ REDIS_DB=0
 `GET /api/health` 返回服务状态，例如：
 
 ```json
-{ "ok": true, "metingApi": "http://127.0.0.1:3000", "cyapi": true, "redis": false }
+{ "ok": true }
 ```
-
-`cyapi` 表示迟言 API 是否已配置；`redis` 表示是否启用房间持久化。
 
 ---
 
@@ -195,7 +199,7 @@ npm run dev
 | 前端 | http://localhost:5173 |
 | 后端 | http://localhost:4000 |
 
-打开前端 → 输入昵称（留空则自动生成）→ 在大厅创建/加入房间 → 搜索点歌。**房主设备**负责实际播控，其他听众跟随同步。电视大屏：`/tv/房间号`。
+打开前端 → 输入昵称（留空则自动生成）→ 在大厅创建/加入房间 → 搜索点歌。**房主**负责播控（切歌、暂停、进度），**所有成员**本地同步播放。电视大屏：`/tv/房间号`。
 
 - 昵称会保存在浏览器本地；未填写时自动从预置词库随机生成（如 `摸鱼听碟42`）
 - 首页展示所有在线房间，每 5 秒自动刷新；可自定义房间名称，创建时可设可选密码

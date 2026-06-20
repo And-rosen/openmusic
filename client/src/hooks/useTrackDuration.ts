@@ -56,6 +56,27 @@ export function resolveDisplayDurationSeconds(
   return 0;
 }
 
+/** 自动切歌判定用时长（秒）：与进度条一致优先真实音频，取各来源最短值 */
+export function resolveAutoSkipThresholdSeconds(
+  song: TrackSong | null | undefined,
+  sources: DurationSources,
+  fileDurationSec?: number,
+): number {
+  if (!song) return 0;
+
+  const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
+  const fileDur = fileDurationSec && fileDurationSec > 0 ? fileDurationSec : 0;
+  const storedMedia = sources.mediaTrackKey === key && sources.mediaDurationMs
+    ? sources.mediaDurationMs / 1000
+    : 0;
+  const displayDur = resolveDisplayDurationSeconds(song, sources);
+
+  const candidates = [fileDur, storedMedia, displayDur].filter((d) => d > 0);
+  if (candidates.length > 0) return Math.min(...candidates);
+
+  return resolveTrackDurationSeconds(song, sources);
+}
+
 export function clampPlaybackTime(currentTime: number, duration: number): number {
   if (duration <= 0) return currentTime;
   return Math.min(currentTime, duration);

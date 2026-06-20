@@ -1,5 +1,74 @@
+const AUDIO_UNLOCK_KEY = 'openmusic:audio-unlocked';
+
+let sessionUnlocked = false;
+
+function isReloadNavigation() {
+  const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  return navigation?.type === 'reload';
+}
+
+/** 页面刷新后浏览器会重新要求用户手势，清除上次会话的解锁标记 */
+function resetUnlockOnPageLoad() {
+  if (!isReloadNavigation()) return;
+  sessionUnlocked = false;
+  try {
+    sessionStorage.removeItem(AUDIO_UNLOCK_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+resetUnlockOnPageLoad();
+
+/** 本会话内用户是否已通过手势解锁音频（仅当前页面内存，刷新后需重新授权） */
+export function isAudioSessionUnlocked(): boolean {
+  return sessionUnlocked;
+}
+
+/** 记录用户已授权，后续切歌不再弹窗（仅当前页面有效） */
+export function markAudioSessionUnlocked(): void {
+  sessionUnlocked = true;
+  try {
+    sessionStorage.setItem(AUDIO_UNLOCK_KEY, '1');
+  } catch {
+    /* private mode */
+  }
+}
+
+/** 播放被拦截时重置，以便再次展示解锁层 */
+export function resetAudioSessionUnlocked(): void {
+  sessionUnlocked = false;
+  try {
+    sessionStorage.removeItem(AUDIO_UNLOCK_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+/**
+ * 是否应展示解锁遮罩。只要本会话尚未通过手势授权就允许展示——
+ * 桌面浏览器在没有用户交互时同样会拦截自动播放，需要弹窗引导点击。
+ * 实际是否展示仍由 needsAudioUnlock（确实被拦截）决定。
+ */
+export function shouldShowUnlockOverlay(): boolean {
+  return !isAudioSessionUnlocked();
+}
+
 export function isWeChatBrowser(): boolean {
   return /MicroMessenger/i.test(navigator.userAgent);
+}
+
+export function isIOS(): boolean {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+export function isMobileDevice(): boolean {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
+/** 微信 / 移动端：自动播放受限，需用户手势解锁 */
+export function isRestrictedAutoplayEnv(): boolean {
+  return isWeChatBrowser() || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
 /** 配置 audio 以支持微信 / iOS 内联播放 */
@@ -8,7 +77,10 @@ export function configureInlineAudio(audio: HTMLAudioElement): void {
   audio.setAttribute('webkit-playsinline', 'true');
   audio.setAttribute('x5-playsinline', 'true');
   audio.setAttribute('x5-video-player-type', 'h5-page');
-  audio.preload = 'auto';
+  audio.setAttribute('x5-video-player-fullscreen', 'false');
+  audio.preload = isMobileDevice() ? 'metadata' : 'auto';
+  (audio as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
+  (audio as HTMLAudioElement & { webkitPlaysInline?: boolean }).webkitPlaysInline = true;
 }
 
 type WeixinBridge = { invoke: (method: string, args: object, cb: () => void) => void };
@@ -33,15 +105,43 @@ export function isTvPage(): boolean {
   return /^\/tv\//.test(window.location.pathname);
 }
 
-/** 须在 click/touch 回调中同步调用，否则 iOS Safari 会丢失用户手势导致 play() 被拒 */
+/** 微信 iOS：在用户手势回调内先走 Bridge，再执行 play */
+export function runInWeChatUserGesture(fn: () => void): void {
+  if (!isWeChatBrowser()) {
+    fn();
+    return;
+  }
+
+  const w = window as Window & { WeixinJSBridge?: WeixinBridge };
+  const run = () => {
+    if (w.WeixinJSBridge) {
+      w.WeixinJSBridge.invoke('getNetworkType', {}, fn);
+    } else {
+      fn();
+    }
+  };
+
+  if (typeof w.WeixinJSBridge !== 'undefined') {
+    run();
+  } else {
+    fn();
+  }
+}
+
+/** 须在 click/touch 回调中同步调用，否则 iOS / 微信会丢失用户手势导致 play() 被拒 */
 export function playInUserGesture(audio: HTMLAudioElement): void {
   if (!audio.src) return;
-  void audio.play().catch(() => {});
+  runInWeChatUserGesture(() => {
+    void audio.play().catch(() => {});
+  });
 }
 
 export async function tryPlay(audio: HTMLAudioElement): Promise<PlayResult> {
+  if (!audio.src) return 'error';
   try {
     await audio.play();
+    // 微信 / iOS 可能 resolve 但仍处于 paused
+    if (audio.paused) return 'blocked';
     return 'played';
   } catch (err) {
     if (err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
@@ -72,4 +172,24 @@ export async function tryPlayWithAutoplayFallback(
     audio.muted = wasMuted;
     return 'blocked';
   }
+}
+
+/** 评估播放是否真正开始（含微信 / iOS 延迟复查） */
+export async function assessPlaybackResult(
+  audio: HTMLAudioElement,
+  initial: PlayResult,
+): Promise<PlayResult> {
+  if (initial !== 'played') return initial;
+  if (!isRestrictedAutoplayEnv()) return 'played';
+
+  const delayMs = isIOS() ? 50 : 120;
+  await new Promise((r) => setTimeout(r, delayMs));
+  if (audio.paused) return 'blocked';
+  return 'played';
+}
+
+/** 根据播放结果判断是否需要展示解锁层 */
+export function playbackNeedsUnlock(result: PlayResult, audio: HTMLAudioElement): boolean {
+  if (result === 'blocked' || result === 'error') return true;
+  return Boolean(audio.src && audio.paused);
 }

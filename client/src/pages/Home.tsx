@@ -184,7 +184,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    leaveRoom();
+    if (useRoomStore.getState().room) {
+      leaveRoom();
+    }
   }, [leaveRoom]);
 
   useEffect(() => {

@@ -47,6 +47,7 @@ npm install --production
 ```env
 PORT=4000
 CLIENT_URL=https://你的域名.com
+CLIENT_ID_SECRET=换成一段长随机字符串
 
 METING_API_URL=http://你的meting地址:3000
 METING_API_AUTH=你的token
@@ -124,6 +125,7 @@ pm2 startup   # 按提示设置开机自启
 | 搜不到歌 / 无法播放 | 检查 `METING_API_URL`、`CYAPI_KEY` |
 | 502 | PM2 是否运行：`pm2 list` |
 | 端口冲突 | 修改 `.env` 的 `PORT` 和 Nginx 反代端口 |
+| 浏览器提示「部分内容不安全」 | 确保用 **https** 访问；重新 `npm run build` 部署最新前端（已走同源媒体代理） |
 
 ---
 

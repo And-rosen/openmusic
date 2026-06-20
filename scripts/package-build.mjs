@@ -8,16 +8,16 @@ const root = path.join(__dirname, '..');
 const outDir = path.join(root, 'release', 'openmusic');
 const archivePath = path.join(root, 'release', 'openmusic-build.zip');
 
-const SERVER_FILES = [
-  'index.js',
-  'loadEnv.js',
-  'roomManager.js',
-  'roomStorage.js',
-  'cyapi.js',
-  'package.json',
-  'package-lock.json',
-  '.env.example',
-];
+const SERVER_STATIC = ['package.json', 'package-lock.json', '.env.example'];
+
+function getServerFiles() {
+  const serverDir = path.join(root, 'server');
+  const jsFiles = fs
+    .readdirSync(serverDir)
+    .filter((name) => name.endsWith('.js'))
+    .sort();
+  return [...jsFiles, ...SERVER_STATIC.filter((name) => fs.existsSync(path.join(serverDir, name)))];
+}
 
 function rm(dir) {
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
@@ -41,7 +41,7 @@ rm(outDir);
 fs.mkdirSync(path.join(outDir, 'server'), { recursive: true });
 fs.mkdirSync(path.join(outDir, 'client', 'dist'), { recursive: true });
 
-for (const file of SERVER_FILES) {
+for (const file of getServerFiles()) {
   const src = path.join(root, 'server', file);
   if (fs.existsSync(src)) {
     fs.copyFileSync(src, path.join(outDir, 'server', file));

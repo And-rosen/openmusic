@@ -1,19 +1,20 @@
 import type { MusicProvider, SearchResult } from '../types';
 import type { MusicSource } from '../../../types';
 import { tencentCyapiProvider } from './cyapi';
+import { fetchWithTimeout } from '../../http';
 
 const API_BASE = '/api/meting';
 
 async function metingFetch<T>(server: MusicSource, params: Record<string, string>): Promise<T> {
   const query = new URLSearchParams({ server, ...params });
-  const res = await fetch(`${API_BASE}?${query}`);
+  const res = await fetchWithTimeout(`${API_BASE}?${query}`);
   if (!res.ok) throw new Error('API 请求失败');
   return res.json();
 }
 
 async function metingText(server: MusicSource, params: Record<string, string>): Promise<string> {
   const query = new URLSearchParams({ server, ...params });
-  const res = await fetch(`${API_BASE}?${query}`);
+  const res = await fetchWithTimeout(`${API_BASE}?${query}`);
   return res.text();
 }
 
@@ -83,7 +84,7 @@ function createMetingProvider(
     async getSongUrl(song) {
       if (song.url?.startsWith('http')) return song.url;
       const query = new URLSearchParams({ server: song.source, type: 'url', id: song.id });
-      const res = await fetch(`${API_BASE}?${query}`, { redirect: 'follow' });
+      const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'follow' });
       const text = await res.text();
       if (text.startsWith('@')) return text.slice(1);
       if (text.startsWith('http')) return text;

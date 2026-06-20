@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from '../http';
+
 const LRC_LINE_RE = /\[\d{2}:\d{2}/;
 
 export function hasValidLrc(text: string): boolean {
@@ -12,7 +14,7 @@ export async function fetchFallbackLrc(songName: string): Promise<string> {
   if (!name) return '';
 
   const params = new URLSearchParams({ msg: name, n: '1' });
-  const res = await fetch(`/api/music/lrc-fallback?${params}`);
+  const res = await fetchWithTimeout(`/api/music/lrc-fallback?${params}`);
   if (!res.ok) return '';
   const text = await res.text();
   return hasValidLrc(text) ? text : '';

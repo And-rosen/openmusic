@@ -1,14 +1,35 @@
 import { getSongUrl, getTrackKey } from '../api/music';
 import type { QueueItem } from '../types';
-import { configureInlineAudio } from './audioUnlock';
+import { configureInlineAudio, isMobileDevice } from './audioUnlock';
 
 const MAX_URL_CACHE = 24;
 const MAX_BUFFER = 2;
 const DEFAULT_PREFETCH_COUNT = 2;
+const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache';
 
-const urlCache = new Map<string, string>();
+const urlCache = loadUrlCacheFromStorage();
 const pendingFetches = new Map<string, Promise<string | null>>();
 const bufferAudios = new Map<string, HTMLAudioElement>();
+
+function loadUrlCacheFromStorage(): Map<string, string> {
+  try {
+    const raw = sessionStorage.getItem(URL_CACHE_STORAGE_KEY);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw) as Record<string, string>;
+    return new Map(Object.entries(obj));
+  } catch {
+    return new Map();
+  }
+}
+
+function persistUrlCacheToStorage() {
+  try {
+    const entries = [...urlCache.entries()].slice(-MAX_URL_CACHE);
+    sessionStorage.setItem(URL_CACHE_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // sessionStorage may be unavailable.
+  }
+}
 
 function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   return getTrackKey(song);
@@ -21,6 +42,7 @@ function trimUrlCache() {
     urlCache.delete(oldest);
     releaseBuffer(oldest);
   }
+  persistUrlCacheToStorage();
 }
 
 function releaseBuffer(trackKey: string) {
@@ -99,13 +121,19 @@ export async function resolveSongUrl(song: QueueItem): Promise<string> {
   return url;
 }
 
+/** 加入房间后立即预取当前歌曲 URL，缩短刷新后的加载等待 */
+export function prefetchCurrentSong(song: QueueItem | null | undefined) {
+  if (!song) return;
+  void fetchSongUrl(song);
+}
+
 export function prefetchQueueSongs(
   queue: QueueItem[],
   options: { count?: number; buffer?: boolean } = {},
 ) {
   const count = options.count ?? DEFAULT_PREFETCH_COUNT;
-  const buffer = options.buffer ?? true;
-  const targets = queue.slice(0, count);
+  const shouldBuffer = (options.buffer ?? true) && !isMobileDevice();
+  const targets = queue.slice(0, isMobileDevice() ? 1 : count);
   const keepKeys = new Set(targets.map(trackKeyOf));
 
   for (const key of bufferAudios.keys()) {
@@ -115,7 +143,7 @@ export function prefetchQueueSongs(
   for (const song of targets) {
     const key = trackKeyOf(song);
     void fetchSongUrl(song).then((url) => {
-      if (url && buffer) bufferAudio(key, url);
+      if (url && shouldBuffer) bufferAudio(key, url);
     });
   }
 }

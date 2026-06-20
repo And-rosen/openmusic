@@ -1,8 +1,10 @@
-import type { MusicSource, RoomCheckResult, RoomSummary, SearchResult, Song } from '../../types';
+import type { MusicSource, RoomCheckResult, RoomSummary, SearchResult, Song, HotSongItem } from '../../types';
 import type { MusicProviderMeta } from './types';
 import { providers, getAllSources } from './sources';
 import { interleaveSearchResults } from './merge';
 import { hasValidLrc, fetchFallbackLrc } from './lrcFallback';
+import { fetchWithTimeout } from '../http';
+import { toSecureMediaUrl } from '../../lib/secureMediaUrl';
 
 function getProvider(source: MusicSource) {
   return providers[source];
@@ -51,7 +53,8 @@ export async function getSongById(source: MusicSource, id: string): Promise<Sear
 
 export async function getSongUrl(song: Pick<Song, 'id' | 'source' | 'url'>): Promise<string> {
   const source = song.source || 'netease';
-  return getProvider(source).getSongUrl({ ...song, source });
+  const url = await getProvider(source).getSongUrl({ ...song, source });
+  return toSecureMediaUrl(url);
 }
 
 export async function getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): Promise<string> {
@@ -76,7 +79,7 @@ export async function getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name
 
 export function getCoverUrl(song: Pick<Song, 'id' | 'source' | 'pic'>): string {
   const source = song.source || 'netease';
-  return getProvider(source).getCoverUrl({ ...song, source });
+  return toSecureMediaUrl(getProvider(source).getCoverUrl({ ...song, source }));
 }
 
 export function getSourceLabel(source?: MusicSource): string {
@@ -86,19 +89,22 @@ export function getSourceLabel(source?: MusicSource): string {
 
 export function parseLrc(lrc: string): import('../../types').LyricLine[] {
   const lines: import('../../types').LyricLine[] = [];
-  const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+  const regex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
   for (const line of lrc.split('\n')) {
-    const match = line.match(regex);
-    if (!match) continue;
+    const matches = [...line.matchAll(regex)];
+    if (matches.length === 0) continue;
 
-    const minutes = parseInt(match[1], 10);
-    const seconds = parseInt(match[2], 10);
-    const ms = parseInt(match[3].padEnd(3, '0'), 10);
-    const time = minutes * 60 + seconds + ms / 1000;
-    const text = match[4].trim();
+    const text = line.slice((matches[matches.length - 1].index ?? 0) + matches[matches.length - 1][0].length).trim();
+    if (!text) continue;
 
-    if (text) lines.push({ time, text });
+    for (const match of matches) {
+      const minutes = parseInt(match[1], 10);
+      const seconds = parseInt(match[2], 10);
+      const fraction = match[3] ? Number(`0.${match[3].padEnd(3, '0').slice(0, 3)}`) : 0;
+      const time = minutes * 60 + seconds + fraction;
+      if (Number.isFinite(time)) lines.push({ time, text });
+    }
   }
 
   return lines.sort((a, b) => a.time - b.time);
@@ -147,7 +153,7 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
   const payload: { name?: string; password?: string } = {};
   if (name?.trim()) payload.name = name.trim();
   if (password?.trim()) payload.password = password.trim();
-  const res = await fetch('/api/rooms', {
+  const res = await fetchWithTimeout('/api/rooms', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -157,21 +163,31 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
 }
 
 export async function listRooms(): Promise<RoomSummary[]> {
-  const res = await fetch('/api/rooms');
+  const res = await fetchWithTimeout('/api/rooms');
   if (!res.ok) throw new Error('获取房间列表失败');
   return res.json();
 }
 
 export async function checkRoom(id: string): Promise<RoomCheckResult> {
-  const res = await fetch(`/api/rooms/${id}`);
+  const res = await fetchWithTimeout(`/api/rooms/${id}`);
   if (!res.ok) return { exists: false, hasPassword: false };
   const data = await res.json();
   return { exists: true, hasPassword: Boolean(data.hasPassword), name: data.name };
 }
 
+export async function getHotSongs(limit = 15): Promise<HotSongItem[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/music/hot?limit=${limit}`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
 export async function getAvailableSources(): Promise<MusicProviderMeta[]> {
   try {
-    const res = await fetch('/api/music/sources');
+    const res = await fetchWithTimeout('/api/music/sources');
     if (res.ok) return res.json();
   } catch {
     // fallback

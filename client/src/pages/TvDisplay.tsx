@@ -17,6 +17,15 @@ import SongInfoPanel from '../components/SongInfoPanel';
 import ProgressBar from '../components/ProgressBar';
 import AudioEngine from '../components/AudioEngine';
 
+function getStoredRoomPassword(roomId: string | undefined) {
+  if (!roomId) return undefined;
+  try {
+    return sessionStorage.getItem(`openmusic:room-password:${roomId.toUpperCase()}`) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function TvDisplay() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -63,14 +72,19 @@ export default function TvDisplay() {
 
   useEffect(() => {
     if (!roomId) return;
-    joinRoom(roomId, '电视机').then((res) => {
+    let cancelled = false;
+    let redirectTimer: number | undefined;
+
+    joinRoom(roomId, '电视机', getStoredRoomPassword(roomId), { readOnly: true }).then((res) => {
+      if (cancelled) return;
       if (!res.success) {
         setJoinError(res.error || '无法连接房间');
-        setTimeout(() => navigate('/'), 3000);
+        redirectTimer = window.setTimeout(() => navigate('/'), 3000);
       }
     });
     return () => {
-      leaveRoom();
+      cancelled = true;
+      if (redirectTimer) window.clearTimeout(redirectTimer);
     };
   }, [roomId, joinRoom, leaveRoom, navigate]);
 

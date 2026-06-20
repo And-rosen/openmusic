@@ -17,12 +17,14 @@ export interface Song {
 export interface QueueItem extends Song {
   queueId: string;
   requestedBy: string;
+  requestedById?: string;
   addedAt: number;
 }
 
 export interface RoomUser {
   id: string;
   nickname: string;
+  readOnly?: boolean;
   joinedAt: number;
 }
 
@@ -56,6 +58,9 @@ export interface RoomState {
   name: string;
   hasPassword?: boolean;
   ownerId: string | null;
+  /** 房间创建者（持久身份，重新进入时恢复房主） */
+  creatorId?: string | null;
+  ownerConnectionId?: string | null;
   queue: QueueItem[];
   current: QueueItem | null;
   isPlaying: boolean;
@@ -65,6 +70,8 @@ export interface RoomState {
   jumpRequests: JumpRequest[];
   skipRequests: SkipRequest[];
   messages: ChatMessage[];
+  /** 服务端正在为空队列拉取随机歌曲 */
+  randomLoading?: boolean;
 }
 
 export interface RoomSummary {
@@ -93,4 +100,9 @@ export interface LyricLine {
 export interface SearchResult extends Song {
   url?: string;
   lrc?: string;
+}
+
+export interface HotSongItem extends Song {
+  count: number;
+  lastRequestedAt?: number;
 }

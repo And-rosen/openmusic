@@ -2,11 +2,40 @@ import { useEffect } from 'react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { getSharedAudio } from '../lib/audioElement';
+import { resolveDisplayDurationSeconds } from '../hooks/useTrackDuration';
+import { getLivePlaybackTime } from '../lib/playbackSync';
+import { getTrackKey } from '../api/music';
+import type { Song, QueueItem } from '../types';
+
+type TimeCapSong = Pick<Song, 'duration' | 'id' | 'source'> & Partial<Pick<QueueItem, 'queueId'>>;
 
 let rafId = 0;
 let loopSubscribers = 0;
 const anchor = { time: 0, at: Date.now() };
 let lastTrackKey = '';
+let lastPublishedTime = 0;
+
+function publishSmoothPlaybackTime(time: number, force = false) {
+  if (!force && Math.abs(time - lastPublishedTime) < 0.05) return;
+  lastPublishedTime = time;
+  useAudioStore.getState().setSmoothPlaybackTime(time);
+}
+
+function getSongDisplayDurationSec(song: TimeCapSong | null | undefined): number {
+  if (!song) return 0;
+  const { lrcDurationMs, lrcTrackKey, mediaDurationMs, mediaTrackKey } = useAudioStore.getState();
+  return resolveDisplayDurationSeconds(song, {
+    lrcDurationMs,
+    lrcTrackKey,
+    mediaDurationMs,
+    mediaTrackKey,
+  });
+}
+
+function capSongTime(time: number, song: TimeCapSong | null | undefined): number {
+  const dur = getSongDisplayDurationSec(song);
+  return dur > 0 ? Math.min(time, dur) : time;
+}
 
 function stopLoop() {
   if (rafId) cancelAnimationFrame(rafId);
@@ -19,13 +48,13 @@ function tick() {
     return;
   }
 
-  const { room, isOwner } = useRoomStore.getState();
+  const { room } = useRoomStore.getState();
   const isPlaying = room?.isPlaying ?? false;
   const roomTime = room?.currentTime ?? 0;
-  const setSmoothPlaybackTime = useAudioStore.getState().setSmoothPlaybackTime;
+  const liveRoomTime = isPlaying ? getLivePlaybackTime(roomTime) : roomTime;
 
   if (!isPlaying) {
-    setSmoothPlaybackTime(roomTime);
+    publishSmoothPlaybackTime(capSongTime(liveRoomTime, room?.current ?? null));
     rafId = requestAnimationFrame(tick);
     return;
   }
@@ -34,21 +63,39 @@ function tick() {
   const song = room?.current;
   const loading = useAudioStore.getState().trackLoading;
 
-  if (isOwner && !loading && song && audio.src && isFinite(audio.currentTime)) {
-    const trackKey = `${song.queueId}:${song.id}`;
+  if (loading && isPlaying && song) {
+    const t = capSongTime(liveRoomTime, song);
+    publishSmoothPlaybackTime(t);
+    anchor.time = t;
+    anchor.at = Date.now();
+    rafId = requestAnimationFrame(tick);
+    return;
+  }
+
+  if (!loading && song && audio.src && isFinite(audio.currentTime)) {
+    const trackKey = getTrackKey(song);
     if (trackKey === lastTrackKey) {
-      const t = audio.currentTime;
-      setSmoothPlaybackTime(t);
       if (!audio.paused) {
+        const t = capSongTime(audio.currentTime, song);
+        publishSmoothPlaybackTime(t);
         anchor.time = t;
         anchor.at = Date.now();
+        rafId = requestAnimationFrame(tick);
+        return;
       }
-      rafId = requestAnimationFrame(tick);
-      return;
+      if (isPlaying) {
+        // 微信等：play 被拦截时仍跟随房间时间推进进度
+        const t = capSongTime(liveRoomTime, song);
+        publishSmoothPlaybackTime(t);
+        anchor.time = t;
+        anchor.at = Date.now();
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
     }
   }
 
-  setSmoothPlaybackTime(anchor.time + (Date.now() - anchor.at) / 1000);
+  publishSmoothPlaybackTime(capSongTime(anchor.time + (Date.now() - anchor.at) / 1000, song));
 
   rafId = requestAnimationFrame(tick);
 }
@@ -61,7 +108,7 @@ function startLoop() {
 export function snapSmoothPlaybackTime(time: number) {
   anchor.time = time;
   anchor.at = Date.now();
-  useAudioStore.getState().setSmoothPlaybackTime(time);
+  publishSmoothPlaybackTime(time, true);
 }
 
 /**
@@ -77,26 +124,28 @@ export function useSmoothPlaybackTime(): number {
   const smoothTime = useAudioStore((s) => s.smoothPlaybackTime);
 
   useEffect(() => {
-    const trackKey = current ? `${current.queueId}:${current.id}` : '';
+    const trackKey = current ? getTrackKey(current) : '';
     const trackChanged = trackKey !== lastTrackKey;
     lastTrackKey = trackKey;
 
     if (trackChanged) {
-      snapSmoothPlaybackTime(0);
+      snapSmoothPlaybackTime(isPlaying ? getLivePlaybackTime(roomTime) : roomTime);
       return;
     }
 
-    // 房主播放中：新用户加入会触发 room_update，不要用服务端时间覆盖进度条
-    if (isOwner && isPlaying) return;
+    // 本地音频播放中：不用服务端时间覆盖进度条（房主 + 听众均适用）
+    const audio = getSharedAudio();
+    if (isPlaying && audio.src && !audio.paused && isFinite(audio.currentTime)) return;
 
-    anchor.time = roomTime;
+    const live = isPlaying ? getLivePlaybackTime(roomTime) : roomTime;
+    anchor.time = live;
     anchor.at = Date.now();
-    useAudioStore.getState().setSmoothPlaybackTime(roomTime);
+      publishSmoothPlaybackTime(capSongTime(live, current), true);
   }, [roomTime, current?.queueId, current?.id, isOwner, isPlaying]);
 
   useEffect(() => {
     if (!isPlaying) {
-      useAudioStore.getState().setSmoothPlaybackTime(roomTime);
+      publishSmoothPlaybackTime(roomTime, true);
       return;
     }
 

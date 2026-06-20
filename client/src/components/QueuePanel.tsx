@@ -2,18 +2,19 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Trash2, Music, Zap } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
-import { formatDuration, getCoverUrl } from '../api/music';
+import { getCoverUrl } from '../api/music';
 import SourceBadge from './SourceBadge';
 
-/** 单条约 52px + 间距，固定显示 3 条 */
+/** 单条约 64px + 间距，固定显示 3 条 */
 const VISIBLE_ROWS = 3;
-const ROW_HEIGHT = 52;
-const ROW_GAP = 4;
+const ROW_HEIGHT = 64;
+const ROW_GAP = 6;
 const LIST_HEIGHT = VISIBLE_ROWS * ROW_HEIGHT + (VISIBLE_ROWS - 1) * ROW_GAP;
 
 export default function QueuePanel() {
   const room = useRoomStore((s) => s.room);
   const nickname = useRoomStore((s) => s.nickname);
+  const mySocketId = useRoomStore((s) => s.mySocketId);
   const isOwner = useRoomStore((s) => s.isOwner);
   const { removeSong, requestJump } = useSocket();
   const [jumpMsg, setJumpMsg] = useState('');
@@ -66,11 +67,15 @@ export default function QueuePanel() {
       )}
 
       <div
-        className="space-y-1 overflow-y-auto pr-0.5"
+        className="space-y-1.5 overflow-y-auto pr-0.5"
         style={{ height: LIST_HEIGHT }}
       >
         {allSongs.map((song, i) => {
-          const isMine = !song.isCurrent && song.requestedBy === nickname;
+          const isMine = !song.isCurrent && (
+            song.requestedById
+              ? song.requestedById === mySocketId
+              : song.requestedBy === nickname
+          );
           const canRemove = !song.isCurrent && (isOwner || isMine);
           const hasPending = pendingQueueIds.has(song.queueId);
 
@@ -78,12 +83,14 @@ export default function QueuePanel() {
             <div
               key={song.queueId || `current-${song.id}`}
               ref={song.isCurrent ? currentRef : undefined}
-              className={`flex items-center gap-2 p-2 rounded-lg transition-colors ${
-                song.isCurrent ? 'bg-netease-red/10 border border-netease-red/20' : 'hover:bg-netease-card/80'
+              className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-colors ${
+                song.isCurrent
+                  ? 'bg-netease-red/10 border border-netease-red/25'
+                  : 'bg-netease-card/35 hover:bg-netease-card/80'
               }`}
               style={{ minHeight: ROW_HEIGHT }}
             >
-              <span className="w-5 text-center text-[10px] text-netease-muted flex-shrink-0">
+              <span className="w-5 text-center text-[11px] text-netease-muted flex-shrink-0">
                 {song.isCurrent ? (
                   <span className="inline-flex gap-0.5 items-end h-3.5">
                     <span className="w-0.5 h-1.5 bg-netease-red animate-pulse" />
@@ -97,48 +104,59 @@ export default function QueuePanel() {
               <img
                 src={getCoverUrl(song)}
                 alt=""
-                className="w-9 h-9 rounded-md object-cover bg-netease-card flex-shrink-0"
+                className="w-11 h-11 rounded-lg object-cover bg-netease-card flex-shrink-0"
               />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  <p className={`text-xs truncate ${song.isCurrent ? 'text-netease-red font-medium' : ''}`}>
+              <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center gap-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p
+                    className={`min-w-0 flex-1 text-sm leading-5 truncate ${
+                      song.isCurrent ? 'text-netease-red font-medium' : 'text-white/92'
+                    }`}
+                    title={song.name}
+                  >
                     {song.name}
                   </p>
-                  <SourceBadge source={song.source || 'netease'} variant="muted" />
+                  <SourceBadge
+                    source={song.source || 'netease'}
+                    className="rounded-full px-1.5 py-0 text-[9px] leading-4"
+                  />
                   {hasPending && (
-                    <span className="text-[9px] text-amber-400/80 flex-shrink-0">待审</span>
+                    <span className="rounded-full bg-amber-400/10 px-1.5 py-0 text-[9px] leading-4 text-amber-300 flex-shrink-0">
+                      待审
+                    </span>
                   )}
                 </div>
-                <p className="text-[10px] text-netease-muted truncate">{song.artist}</p>
+                <div className="flex items-center gap-2 text-[11px] leading-4 text-netease-muted min-w-0">
+                  <span className="min-w-0 truncate" title={song.artist}>
+                    {song.artist}
+                  </span>
+                  {!song.isCurrent && song.requestedBy && (
+                    <span className="min-w-0 truncate text-netease-muted/65" title={`${song.requestedBy}点的歌`}>
+                      {song.requestedBy}点的歌
+                    </span>
+                  )}
+                </div>
               </div>
-              {song.duration && (
-                <span className="text-[10px] text-netease-muted hidden xl:block flex-shrink-0">
-                  {formatDuration(song.duration / 1000)}
-                </span>
-              )}
-              {!song.isCurrent && (
-                <span className="text-[10px] text-netease-muted/70 hidden sm:block flex-shrink-0 max-w-[3.5rem] truncate">
-                  {song.requestedBy}
-                </span>
-              )}
-              {isMine && !hasPending && (
-                <button
-                  onClick={() => handleJumpRequest(song.queueId)}
-                  className="p-1 rounded-md text-amber-400/70 hover:text-amber-400 hover:bg-amber-400/10 transition-colors flex-shrink-0"
-                  title="申请插队"
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                </button>
-              )}
-              {canRemove && (
-                <button
-                  onClick={() => removeSong(song.queueId)}
-                  className="p-1 rounded-md text-netease-muted hover:text-netease-red hover:bg-netease-red/10 transition-colors flex-shrink-0"
-                  title={isOwner && !isMine ? '移除歌曲' : '删除我的点歌'}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
+              <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                {isMine && !hasPending && (
+                  <button
+                    onClick={() => handleJumpRequest(song.queueId)}
+                    className="p-1.5 rounded-lg text-amber-400/75 hover:text-amber-300 hover:bg-amber-400/10 transition-colors"
+                    title="申请插队"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {canRemove && (
+                  <button
+                    onClick={() => removeSong(song.queueId)}
+                    className="p-1.5 rounded-lg text-netease-muted hover:text-netease-red hover:bg-netease-red/10 transition-colors"
+                    title={isOwner && !isMine ? '移除歌曲' : '删除我的点歌'}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

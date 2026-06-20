@@ -59,6 +59,10 @@ export function isRedisEnabled() {
   return enabled;
 }
 
+export function getRedisClient() {
+  return enabled ? redisClient : null;
+}
+
 export async function initRoomStorage() {
   const options = buildRedisOptions();
   if (!options) {
@@ -106,12 +110,22 @@ export async function loadAllRoomsFromStorage() {
 export async function saveRoomToStorage(roomSnapshot) {
   if (!enabled || !redisClient) return;
 
+  const payload = JSON.stringify(roomSnapshot);
   try {
-    await redisClient.set(roomKey(roomSnapshot.id), JSON.stringify(roomSnapshot));
+    await redisClient.set(roomKey(roomSnapshot.id), payload);
     await redisClient.sAdd(ROOM_IDS_KEY, roomSnapshot.id);
   } catch (err) {
     console.error(`Redis: 保存房间 ${roomSnapshot.id} 失败:`, err.message);
   }
+}
+
+/** 异步持久化，避免 JSON 序列化阻塞 HTTP / Socket 热路径 */
+export function queueSaveRoomToStorage(roomSnapshot) {
+  if (!enabled || !redisClient) return;
+
+  setImmediate(() => {
+    void saveRoomToStorage(roomSnapshot);
+  });
 }
 
 export async function deleteRoomFromStorage(roomId) {
