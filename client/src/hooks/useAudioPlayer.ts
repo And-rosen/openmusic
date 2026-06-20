@@ -7,7 +7,7 @@ import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import { resolveAutoSkipThresholdSeconds, resolveDisplayDurationSeconds } from '../hooks/useTrackDuration';
 import type { QueueItem } from '../types';
 import { getSharedAudio } from '../lib/audioElement';
-import { onWeChatBridgeReady, playInUserGesture, tryPlayWithAutoplayFallback, assessPlaybackResult, playbackNeedsUnlock, isAudioSessionUnlocked, markAudioSessionUnlocked, resetAudioSessionUnlocked, shouldShowUnlockOverlay, isMobileDevice, isRestrictedAutoplayEnv, type PlayResult } from '../lib/audioUnlock';
+import { onWeChatBridgeReady, playInUserGesture, tryPlayWithAutoplayFallback, assessPlaybackResult, playbackNeedsUnlock, isAudioSessionUnlocked, markAudioSessionUnlocked, resetAudioSessionUnlocked, shouldShowUnlockOverlay, shouldPromptAudioUnlock, isMobileDevice, isRestrictedAutoplayEnv, type PlayResult } from '../lib/audioUnlock';
 import { prefetchQueueSongs, rememberSongUrl, resolveSongUrl } from '../lib/songPreloadCache';
 import { getLivePlaybackTime, waitForAudioMinimumReady } from '../lib/playbackSync';
 
@@ -31,7 +31,7 @@ let activeAudioRuntime: AudioRuntime | null = null;
 const OWNER_SYNC_INTERVAL_MS = isMobileDevice() ? 5000 : 2000;
 const LISTENER_DRIFT_SEC = isMobileDevice() ? 1.25 : 0.35;
 const LISTENER_SEEK_COOLDOWN_MS = isMobileDevice() ? 4000 : 1500;
-const UNLOCK_POLL_MS = isMobileDevice() ? 350 : 800;
+const UNLOCK_POLL_MS = isMobileDevice() ? 120 : 800;
 
 function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   return getTrackKey(song);
@@ -333,6 +333,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [playAudio, applyPlaybackResult, setNeedsAudioUnlock]);
 
   useEffect(() => {
+    if (!room?.current) return;
+    if (shouldPromptAudioUnlock(Boolean(room.isPlaying))) {
+      setNeedsAudioUnlock(true);
+    }
+  }, [room?.current?.queueId, room?.current?.id, room?.current?.source, room?.isPlaying, setNeedsAudioUnlock]);
+
+  useEffect(() => {
     const gen = ++loadGeneration.current;
     const audio = initAudio();
     const current = room?.current;
@@ -380,7 +387,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           errorRetries.current = 0;
           lastTrackKey.current = trackKey;
           setTrackLoading(true);
-          setNeedsAudioUnlock(false);
+          const liveBeforeLoad = useRoomStore.getState().room;
+          if (!shouldPromptAudioUnlock(Boolean(liveBeforeLoad?.isPlaying))) {
+            setNeedsAudioUnlock(false);
+          } else {
+            setNeedsAudioUnlock(true);
+          }
           setLrcDuration(null, null);
           setMediaDuration(null, null);
 
@@ -392,6 +404,20 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             audio.src = url;
             await audio.load();
             if (gen !== loadGeneration.current) return;
+
+            const liveAfterSrc = useRoomStore.getState().room;
+            if (
+              isRestrictedAutoplayEnv()
+              && liveAfterSrc?.isPlaying
+              && liveAfterSrc.current
+              && trackKeyOf(liveAfterSrc.current) === trackKey
+            ) {
+              const earlyProbe = await playAudio(audio);
+              if (playbackNeedsUnlock(earlyProbe, audio)) {
+                setTrackLoading(false);
+                applyPlaybackResult(earlyProbe, audio, liveAfterSrc);
+              }
+            }
 
             await waitForAudioMinimumReady(audio);
             if (gen !== loadGeneration.current) return;
@@ -406,6 +432,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
               && liveAfterLoad?.isPlaying
               && liveAfterLoad.current
               && trackKeyOf(liveAfterLoad.current) === trackKey
+              && !useAudioStore.getState().needsAudioUnlock
             ) {
               const probe = await playAudio(audio);
               if (playbackNeedsUnlock(probe, audio)) {

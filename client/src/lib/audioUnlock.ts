@@ -71,6 +71,11 @@ export function isRestrictedAutoplayEnv(): boolean {
   return isWeChatBrowser() || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
+/** 房间正在播放且尚未手势授权时，应尽早展示解锁层（不必等音频缓冲完成） */
+export function shouldPromptAudioUnlock(isPlaying: boolean): boolean {
+  return Boolean(isPlaying && isRestrictedAutoplayEnv() && shouldShowUnlockOverlay());
+}
+
 /** 配置 audio 以支持微信 / iOS 内联播放 */
 export function configureInlineAudio(audio: HTMLAudioElement): void {
   audio.setAttribute('playsinline', 'true');

@@ -64,7 +64,7 @@ export function waitForAudioMinimumReady(audio: HTMLAudioElement): Promise<void>
   }
 
   return new Promise((resolve) => {
-    const timer = window.setTimeout(resolve, 1200);
+    const timer = window.setTimeout(resolve, 400);
     const done = () => {
       window.clearTimeout(timer);
       audio.removeEventListener('loadedmetadata', done);

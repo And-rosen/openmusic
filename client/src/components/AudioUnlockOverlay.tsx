@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Volume2 } from 'lucide-react';
 import { useAudioStore } from '../stores/audioStore';
@@ -13,14 +13,9 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
   const needsAudioUnlock = useAudioStore((s) => s.needsAudioUnlock);
   const retryPlayback = useAudioStore((s) => s.retryPlayback);
   const room = useRoomStore((s) => s.room);
-  const [mounted, setMounted] = useState(false);
   const handlingRef = useRef(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!needsAudioUnlock || !room?.current || !mounted || !shouldShowUnlockOverlay()) return null;
+  if (!needsAudioUnlock || !room?.current || !shouldShowUnlockOverlay()) return null;
 
   const handleUnlock = () => {
     if (handlingRef.current) return;
@@ -49,7 +44,7 @@ export default function AudioUnlockOverlay({ tvMode = false }: Props) {
       type="button"
       onClick={!isMobileDevice() ? handlePointerUnlock : undefined}
       onTouchStart={isMobileDevice() ? handlePointerUnlock : undefined}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 touch-manipulation cursor-pointer animate-fade-in"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 touch-manipulation cursor-pointer"
       style={{ WebkitTapHighlightColor: 'transparent' }}
       aria-label="开启声音"
     >
