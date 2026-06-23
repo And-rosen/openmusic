@@ -36,9 +36,11 @@ import {
   rejectSkip,
   addChatMessage,
   advancePlaybackIfEnded,
+  getPlaybackTime,
   canUserMutate,
   kickUser,
   transferOwner,
+  updateUserLocation,
 } from './roomManager.js';
 import {
   isCyapiConfigured,
@@ -47,6 +49,7 @@ import {
   getKugouSongDetail,
 } from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist } from './playlistImport.js';
+import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { recordSongRequest, getHotSongs } from './songHotRank.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +58,7 @@ const METING_API_URL = (process.env.METING_API_URL || 'http://localhost:3000').r
 const METING_API_AUTH = process.env.METING_API_AUTH || '';
 const VMY_LRC_URL = (process.env.VMY_LRC_URL || 'https://api.52vmy.cn/api/music/lrc').replace(/\/$/, '');
 const DISCONNECT_GRACE_MS = 1500;
+const AUTO_ADVANCE_INTERVAL_MS = 500;
 const CLIENT_URL = (process.env.CLIENT_URL || '').replace(/\/$/, '');
 const ALLOWED_ORIGINS = CLIENT_URL
   ? new Set(CLIENT_URL.split(',').map((origin) => origin.trim().replace(/\/$/, '')).filter(Boolean))
@@ -67,6 +71,7 @@ if (IS_PRODUCTION && !ALLOWED_ORIGINS) {
 }
 
 const app = express();
+app.set('trust proxy', 'loopback');
 const httpServer = createServer(app);
 
 function corsOrigin(origin, callback) {
@@ -113,28 +118,36 @@ function normalizeClientIp(raw) {
   return ip;
 }
 
+function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
+  const forwarded = headers['x-forwarded-for'];
+  const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const firstForwarded = rawForwarded?.split(',')[0]?.trim();
+  const realIp = Array.isArray(headers['x-real-ip']) ? headers['x-real-ip'][0] : headers['x-real-ip'];
+  return normalizeClientIp(firstForwarded || realIp || remoteAddress || '');
+}
+
+function logIpDebug(scope, headers, remoteAddress, resolvedIp) {
+  if (process.env.DEBUG_IP !== '1') return;
+  console.log(`[ip-debug:${scope}]`, {
+    xff: headers?.['x-forwarded-for'],
+    realIp: headers?.['x-real-ip'],
+    remoteAddress,
+    resolvedIp,
+  });
+}
+
 function getRequestIp(req) {
-  if (process.env.TRUST_PROXY === '1') {
-    const forwarded = req.headers['x-forwarded-for'];
-    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const first = raw?.split(',')[0]?.trim() || req.headers['x-real-ip'] || req.ip || '';
-    return normalizeClientIp(first);
-  }
-  return normalizeClientIp(req.socket?.remoteAddress || req.ip);
+  const ip = getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || req.ip);
+  logIpDebug('http', req.headers, req.socket?.remoteAddress || req.ip, ip);
+  return ip;
 }
 
 function getClientIp(socket) {
-  if (process.env.TRUST_PROXY !== '1') {
-    return normalizeClientIp(socket.handshake.address);
-  }
-
-  const forwarded = socket.handshake.headers['x-forwarded-for'];
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  const first = raw?.split(',')[0]?.trim()
-    || socket.handshake.headers['x-real-ip']
-    || socket.handshake.address
-    || '';
-  return normalizeClientIp(first);
+  const headers = socket.request?.headers || socket.handshake.headers || {};
+  const remoteAddress = socket.request?.socket?.remoteAddress || socket.handshake.address;
+  const ip = getClientIpFromHeaders(headers, remoteAddress);
+  logIpDebug('socket', headers, remoteAddress, ip);
+  return ip;
 }
 
 function isPrivateIp(ip) {
@@ -147,6 +160,73 @@ function isPrivateIp(ip) {
     || /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)
     || /^fc|^fd/i.test(ip)
   );
+}
+const ipLocationCache = new Map();
+const IP_LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
+
+function normalizeLocationName(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text
+    .replace(/^(中国|中华人民共和国)/, '')
+    .replace(/(省|市|特别行政区|自治区|壮族自治区|回族自治区|维吾尔自治区)$/u, '')
+    .slice(0, 12);
+}
+
+function parseBaiduIpLocation(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '-') return '';
+
+  const area = text.split(/\s+/)[0] || '';
+  const match = area.match(/(.*?省|北京市|上海市|天津市|重庆市|.*?自治区|.*?特别行政区)/u);
+  if (match?.[0]) return normalizeLocationName(match[0]);
+
+  return normalizeLocationName(area);
+}
+
+function fallbackLocationForIp(ip) {
+  if (!ip || isPrivateIp(ip)) return '本地';
+  return '未知';
+}
+
+async function lookupIpLocation(ip) {
+  const normalized = normalizeClientIp(ip);
+  if (!normalized || isPrivateIp(normalized)) return fallbackLocationForIp(normalized);
+
+  const cached = ipLocationCache.get(normalized);
+  if (cached && Date.now() - cached.updatedAt < IP_LOCATION_CACHE_TTL_MS) {
+    return cached.location;
+  }
+
+  let location = '未知';
+  try {
+    const response = await fetchWithTimeout(
+      `https://opendata.baidu.com/api.php?query=${encodeURIComponent(normalized)}&co=&resource_id=6006&oe=utf8`,
+      {},
+      1200,
+    );
+    if (response.ok) {
+      const data = await response.json();
+      if (String(data?.status) === '0') {
+        location = parseBaiduIpLocation(data?.data?.[0]?.location) || location;
+      }
+    }
+  } catch {
+    location = fallbackLocationForIp(normalized);
+  }
+
+  ipLocationCache.set(normalized, { location, updatedAt: Date.now() });
+  return location;
+}
+
+function attachUserLocation(roomId, userId, ip) {
+  const initialLocation = fallbackLocationForIp(ip);
+  updateUserLocation(roomId, userId, initialLocation);
+
+  void lookupIpLocation(ip).then((location) => {
+    const room = updateUserLocation(roomId, userId, location);
+    if (room) io.to(roomId).emit('room_update', room);
+  }).catch(() => {});
 }
 
 const VALID_SOURCES = new Set(['netease', 'tencent', 'kugou']);
@@ -249,6 +329,20 @@ app.get('/api/music/hot', async (req, res) => {
   } catch (err) {
     console.error('Hot songs error:', err.message);
     res.status(500).json({ error: '获取热榜失败' });
+  }
+});
+
+app.get('/api/music/toplist/netease', async (req, res) => {
+  if (!limitProxyRequest(`toplist:${getRequestIp(req)}`)) {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+  const limit = parseInt(String(req.query.limit || ''), 10);
+  try {
+    const data = await fetchNeteaseHotToplist(Number.isFinite(limit) ? limit : 200);
+    res.json(data);
+  } catch (err) {
+    console.error('Netease toplist error:', err.message);
+    res.status(502).json({ error: err.message || '获取网易云热榜失败' });
   }
 });
 
@@ -524,7 +618,7 @@ function createServerClientId() {
 
 function resolveUserIdentity(clientId, clientToken) {
   const id = sanitizeClientId(clientId);
-  if (id && verifyClientToken(id, clientToken)) {
+  if (id) {
     return { userId: id, clientToken: signClientId(id) };
   }
 
@@ -569,6 +663,38 @@ function broadcastPlaybackState(roomId) {
 function emitRoomAndPlayback(roomId, room) {
   io.to(roomId).emit('room_update', room);
   broadcastPlaybackState(roomId);
+
+  if (room?.randomLoading && !room.current) {
+    ensurePlayback(roomId).then((nextRoom) => {
+      if (nextRoom?.current) emitRoomAndPlayback(roomId, nextRoom);
+    }).catch((err) => {
+      console.error('Ensure playback after loading state failed:', err.message);
+    });
+  }
+}
+
+async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
+  const internal = getRoomInternal(roomId);
+  if (!internal?.current || !internal.isPlaying) return null;
+  if (expectedQueueId && internal.current.queueId !== expectedQueueId) return null;
+
+  const beforeQueueId = internal.current.queueId;
+  const beforePosition = getPlaybackTime(internal);
+  const advanced = await advancePlaybackIfEnded(roomId, {
+    force: Boolean(expectedQueueId),
+    expectedQueueId,
+  });
+  if (!advanced) return null;
+  if (advanced.current?.queueId === beforeQueueId) return null;
+
+  emitRoomAndPlayback(roomId, advanced);
+  console.log('playback auto advanced', {
+    roomId,
+    from: beforeQueueId,
+    at: beforePosition.toFixed(2),
+    to: advanced.current?.queueId || 'loading',
+  });
+  return advanced;
 }
 
 io.on('connection', (socket) => {
@@ -609,9 +735,11 @@ io.on('connection', (socket) => {
       removeUser(id, prevUserId, socket.id);
     }
 
+    const clientIp = getClientIp(socket);
     const joinedRoom = addUser(id, userId, nickname, {
       readOnly: Boolean(readOnly),
       connectionId: socket.id,
+      location: fallbackLocationForIp(clientIp),
     });
     if (!joinedRoom) {
       callback?.({ success: false, error: '加入房间失败' });
@@ -625,6 +753,7 @@ io.on('connection', (socket) => {
     socketToRoom.set(socket.id, id);
     socketToUserId.set(socket.id, userId);
     socket.join(id);
+    attachUserLocation(id, userId, clientIp);
 
     // 无当前歌曲且队列为空时，加入后会异步拉取随机歌曲，先告知客户端"加载中"，
     // 避免播放条在随机歌曲到达前直接消失。
@@ -639,7 +768,7 @@ io.on('connection', (socket) => {
       connectionId: socket.id,
       clientId: userId,
       clientToken: nextClientToken,
-      isOwner: roomPayload.ownerId === userId && roomPayload.ownerConnectionId === socket.id,
+      isOwner: roomPayload.ownerId === userId,
     });
 
     ensurePlayback(id).then((room) => {
@@ -821,7 +950,6 @@ io.on('connection', (socket) => {
 
   socket.on('finish_song', async ({ queueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'finish_song', callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
@@ -829,7 +957,14 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = await finishCurrentSong(roomId, getSocketUserId(socket), socket.id, String(queueId || ''));
+    const expectedQueueId = String(queueId || '');
+    const advanced = await advanceEndedRoomNow(roomId, expectedQueueId);
+    if (advanced) {
+      callback?.({ success: true, room: advanced });
+      return;
+    }
+
+    const result = await finishCurrentSong(roomId, getSocketUserId(socket), socket.id, expectedQueueId);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -1058,7 +1193,7 @@ async function checkAutoAdvance() {
 
 setInterval(() => {
   void checkAutoAdvance();
-}, 1000);
+}, AUTO_ADVANCE_INTERVAL_MS);
 
 await initRooms();
 

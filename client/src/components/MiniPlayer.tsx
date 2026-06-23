@@ -4,9 +4,10 @@ import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 
-import { formatDuration, getCoverUrl } from '../api/music';
+import { formatDuration, getCoverUrl, getActiveLyricPair } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
+import { useTrackLyrics } from '../hooks/useTrackLyrics';
 
 import SourceBadge from './SourceBadge';
 
@@ -45,6 +46,8 @@ export default function MiniPlayer({ onExpand }: Props) {
   const duration = useTrackDuration(current);
   const displayTime = clampPlaybackTime(currentTime, duration);
   const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
+  const lyrics = useTrackLyrics(current);
+  const { current: currentLyric, next: nextLyric } = getActiveLyricPair(lyrics, displayTime);
 
   const handlePlayPause = () => {
     if (!room) return;
@@ -123,7 +126,7 @@ export default function MiniPlayer({ onExpand }: Props) {
 
       <div className="max-w-5xl mx-auto flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5">
 
-        <button onClick={onExpand} className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 text-left">
+        <button onClick={onExpand} className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0 max-w-[38%] sm:max-w-[32%] min-w-0 text-left">
 
           <img
 
@@ -135,7 +138,7 @@ export default function MiniPlayer({ onExpand }: Props) {
 
           />
 
-          <div className="min-w-0">
+          <div className="min-w-0 hidden sm:block">
 
             <div className="flex items-center gap-1 sm:gap-1.5">
 
@@ -156,11 +159,34 @@ export default function MiniPlayer({ onExpand }: Props) {
 
           </div>
 
-          <ChevronUp className="w-4 h-4 text-netease-muted flex-shrink-0" />
+          <ChevronUp className="w-4 h-4 text-netease-muted flex-shrink-0 sm:hidden" />
 
         </button>
 
+        <button
+          onClick={onExpand}
+          className="flex-1 min-w-0 text-center px-1 sm:px-2"
+        >
+          {currentLyric || nextLyric ? (
+            <>
+              <p className="text-xs sm:text-sm font-medium truncate leading-tight">
+                {currentLyric || '\u00A0'}
+              </p>
+              <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">
+                {nextLyric || '\u00A0'}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs sm:text-sm font-medium truncate leading-tight">{current.name}</p>
+              <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">
+                {current.artist}
+              </p>
+            </>
+          )}
+        </button>
 
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
 
         <span className="text-[10px] text-netease-muted hidden sm:block">
 
@@ -214,6 +240,8 @@ export default function MiniPlayer({ onExpand }: Props) {
         )}
 
         <VolumeControl compact className="flex-shrink-0" />
+
+        </div>
 
       </div>
 

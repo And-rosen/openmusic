@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Crown, Pencil, UserMinus, Users, X } from 'lucide-react';
+import { Check, Crown, MapPin, Pencil, UserMinus, Users, X } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 import ConfirmModal from './ConfirmModal';
@@ -240,8 +240,12 @@ export default function OnlineUsers({ users, ownerId, creatorId, onNotice }: Pro
                         )}
                         {user.readOnly && <span className="rounded-full bg-white/8 px-1.5 text-[9px] text-netease-muted">TV</span>}
                       </div>
-                    </div>
+                      <div className="mt-0.5 flex items-center gap-1 text-[10px] text-netease-muted/70">
+                        <MapPin className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{user.location || '未知'}</span>
+                      </div>
 
+                    </div>
                     <div className="flex flex-shrink-0 items-center">
                       {isMe && !editing && (
                         <>

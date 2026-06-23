@@ -10,6 +10,7 @@ interface Props {
   sliderClassName?: string;
   /** 紧凑模式：仅图标，点击展开滑条 */
   compact?: boolean;
+  buttonClassName?: string;
 }
 
 function trackWidthClass(heightClass: string): string {
@@ -23,6 +24,7 @@ export default function VolumeControl({
   iconClassName = 'w-4 h-4',
   sliderClassName = 'h-20',
   compact = false,
+  buttonClassName = 'w-8 h-8 text-netease-muted hover:text-white',
 }: Props) {
   const volume = useAudioStore((s) => s.volume);
   const setVolume = useAudioStore((s) => s.setVolume);
@@ -73,9 +75,10 @@ export default function VolumeControl({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="w-8 h-8 flex items-center justify-center text-netease-muted hover:text-white transition-colors"
+          className={`flex items-center justify-center transition-colors ${buttonClassName}`}
           title="音量"
           aria-label="音量"
+          aria-expanded={expanded}
         >
           <Icon className={iconClassName} />
         </button>

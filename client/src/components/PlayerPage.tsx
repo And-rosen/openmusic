@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import {
   ChevronDown, Play, Pause, SkipForward, Loader2,
@@ -8,11 +8,10 @@ import { useAudioStore } from '../stores/audioStore';
 
 import { useSocket } from '../hooks/useSocket';
 
-import { getLyrics, parseLrc, formatDuration, getCoverUrl, getLrcFallbackDurationMs, getTrackKey } from '../api/music';
+import { formatDuration, getCoverUrl } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
-
-import type { LyricLine } from '../types';
+import { useTrackLyrics } from '../hooks/useTrackLyrics';
 
 import Lyrics from './Lyrics';
 import VinylPlayer from './VinylPlayer';
@@ -38,12 +37,9 @@ export default function PlayerPage({ onClose }: Props) {
   const isOwner = useRoomStore((s) => s.isOwner);
   const trackLoading = useAudioStore((s) => s.trackLoading);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
-  const setLrcDuration = useAudioStore((s) => s.setLrcDuration);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
   const { togglePlay, skipSong, requestSkip } = useSocket();
-
-  const [lyrics, setLyrics] = useState<LyricLine[]>([]);
 
   const [bgLoaded, setBgLoaded] = useState(false);
 
@@ -54,6 +50,7 @@ export default function PlayerPage({ onClose }: Props) {
 
 
   const current = room?.current;
+  const lyrics = useTrackLyrics(current);
 
   const isPlaying = room?.isPlaying ?? false;
 
@@ -104,39 +101,6 @@ export default function PlayerPage({ onClose }: Props) {
       setSkipError(res.error || '申请失败');
     }
   };
-
-
-
-  useEffect(() => {
-
-    if (!current) return;
-
-    setLyrics([]);
-
-    getLyrics({
-
-      id: current.id,
-
-      source: current.source || 'netease',
-
-      name: current.name,
-
-      lrc: current.lrc,
-
-    })
-
-      .then((lrc) => {
-        const lines = parseLrc(lrc);
-        setLyrics(lines);
-        if (!current.duration) {
-          const ms = getLrcFallbackDurationMs(lrc);
-          if (ms) setLrcDuration(getTrackKey(current), ms);
-        }
-      })
-
-      .catch(() => setLyrics([]));
-
-  }, [current?.id, current?.source, current?.name, current?.lrc, current?.duration, setLrcDuration]);
 
 
 
@@ -280,8 +244,10 @@ export default function PlayerPage({ onClose }: Props) {
         <div className="flex items-center justify-center gap-8 sm:gap-10 2xl:gap-16">
 
           <VolumeControl
+            compact
             iconClassName="w-4 h-4 sm:w-5 sm:h-5 2xl:w-7 2xl:h-7"
             sliderClassName="h-20 sm:h-24 2xl:h-32"
+            buttonClassName="w-10 h-10 sm:w-12 sm:h-12 2xl:w-20 2xl:h-20 text-white/70 hover:text-white"
           />
 
           {isOwner ? (

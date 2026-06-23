@@ -9,23 +9,10 @@ import {
 
 const DRIFT_LOCK_SEC = 0.05;
 const MICRO_DRIFT_SEC = 0.3;
-const VISIBILITY_GRACE_MS = 8000;
 const RESUME_SOFT_DRIFT_SEC = 0.5;
 const RESUME_HARD_DRIFT_SEC = 2;
 
-let visibilityResumeAt = 0;
-
-export function markVisibilityResume(): void {
-  visibilityResumeAt = Date.now();
-}
-
-function inVisibilityGrace(): boolean {
-  return visibilityResumeAt > 0 && Date.now() - visibilityResumeAt < VISIBILITY_GRACE_MS;
-}
-
-function isDocumentHidden(): boolean {
-  return typeof document !== 'undefined' && document.hidden;
-}
+export function markVisibilityResume(): void {}
 
 function tunePlaybackRate(audio: HTMLAudioElement, diff: number): void {
   audio.playbackRate = diff > 0 ? 1.03 : 0.97;
@@ -56,7 +43,6 @@ export async function applyFollowerSync(
   options: ApplySyncOptions,
 ): Promise<PlayResult | 'paused' | 'idle'> {
   if (!audio.src) return 'idle';
-  if (isDocumentHidden()) return 'idle';
 
   const state = getClientPlaybackState();
   const isPlaying = state?.status === 'playing';
@@ -70,6 +56,14 @@ export async function applyFollowerSync(
       snapSmoothPlaybackTime(target);
     }
     return 'paused';
+  }
+
+  const diffBeforePlay = target - audio.currentTime;
+  const mustHardSeek = options.forceZero || options.forceTime !== undefined || Math.abs(diffBeforePlay) >= MICRO_DRIFT_SEC;
+  if (mustHardSeek) {
+    audio.playbackRate = 1;
+    audio.currentTime = target;
+    snapSmoothPlaybackTime(target);
   }
 
   if (audio.paused) {
@@ -85,7 +79,7 @@ export async function applyFollowerSync(
     return 'played';
   }
 
-  if (inVisibilityGrace() || Math.abs(diff) < MICRO_DRIFT_SEC) {
+  if (Math.abs(diff) < MICRO_DRIFT_SEC) {
     tunePlaybackRate(audio, diff);
     return 'played';
   }
@@ -100,7 +94,7 @@ export async function applyVisibilityResume(
   audio: HTMLAudioElement,
   options: ApplySyncOptions,
 ): Promise<PlayResult | 'paused' | 'idle'> {
-  if (!audio.src || isDocumentHidden()) return 'idle';
+  if (!audio.src) return 'idle';
 
   const state = getClientPlaybackState();
   const target = resolveTargetTime(audio, options);
@@ -114,6 +108,14 @@ export async function applyVisibilityResume(
       snapSmoothPlaybackTime(target);
     }
     return 'paused';
+  }
+
+  const diffBeforePlay = target - audio.currentTime;
+  const mustHardSeek = options.forceZero || options.forceTime !== undefined || Math.abs(diffBeforePlay) >= MICRO_DRIFT_SEC;
+  if (mustHardSeek) {
+    audio.playbackRate = 1;
+    audio.currentTime = target;
+    snapSmoothPlaybackTime(target);
   }
 
   if (audio.paused) {

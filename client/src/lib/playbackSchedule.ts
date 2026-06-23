@@ -9,15 +9,10 @@ import {
 } from './playbackState';
 import type { RoomState } from '../types';
 
-const PLAYBACK_DEBOUNCE_MS = 150;
-
-let latestPlaybackState: PlaybackState | null = null;
-let playbackScheduled = false;
-let playbackDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
 function syncRoomPlaybackFromState(state: PlaybackState) {
   const { room } = useRoomStore.getState();
   if (!room || room.id !== state.roomId) return;
+  if (!room.current || room.current.queueId !== state.trackId) return;
   useRoomStore.getState().setRoom({
     ...room,
     currentTime: getPlaybackTime(state),
@@ -33,29 +28,12 @@ export function commitPlaybackState(state: PlaybackState): boolean {
   return true;
 }
 
-/** 防抖合并高频 playback_state（150ms） */
+/** 立即应用服务端播放状态，避免 seek / 切歌边界被旧状态短暂覆盖。 */
 export function schedulePlaybackState(state: PlaybackState): void {
-  latestPlaybackState = state;
-  if (playbackScheduled) return;
-  playbackScheduled = true;
-  playbackDebounceTimer = setTimeout(() => {
-    playbackScheduled = false;
-    playbackDebounceTimer = null;
-    if (latestPlaybackState) {
-      commitPlaybackState(latestPlaybackState);
-      latestPlaybackState = null;
-    }
-  }, PLAYBACK_DEBOUNCE_MS);
+  commitPlaybackState(state);
 }
 
-export function resetPlaybackScheduling(): void {
-  if (playbackDebounceTimer) {
-    clearTimeout(playbackDebounceTimer);
-    playbackDebounceTimer = null;
-  }
-  playbackScheduled = false;
-  latestPlaybackState = null;
-}
+export function resetPlaybackScheduling(): void {}
 
 export function seedPlaybackFromRoom(room: RoomState): void {
   if (!room.current) {

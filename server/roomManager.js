@@ -16,7 +16,7 @@ const ROOM_EMPTY_TTL_MS = 10 * 60 * 1000;
 const MAX_QUEUE_LENGTH = 200;
 const MAX_RANDOM_HISTORY = 200;
 const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
-const AUTO_ADVANCE_GRACE_SEC = 0.75;
+const AUTO_ADVANCE_GRACE_SEC = 0.15;
 const LRC_TAIL_PADDING_SEC = 20;
 
 const rooms = new Map();
@@ -438,6 +438,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
     joinedAt: existing?.joinedAt || Date.now(),
     connectionId: options.connectionId || null,
     connectionIds,
+    location: String(options.location || existing?.location || '').trim().slice(0, 12),
   });
 
   reassignOrphanQueueOwnership(
@@ -647,6 +648,20 @@ export function removeUser(roomId, userId, connectionId = null) {
   return serializeRoom(room);
 }
 
+
+export function updateUserLocation(roomId, userId, location) {
+  const room = rooms.get(roomId);
+  const user = room?.users.get(userId);
+  if (!room || !user) return null;
+
+  const nextLocation = String(location || '').trim().slice(0, 12);
+  if (user.location === nextLocation) return serializeRoom(room);
+
+  user.location = nextLocation;
+  persistRoom(room);
+  return serializeRoom(room);
+}
+
 export function canUserMutate(roomId, userId) {
   const room = rooms.get(roomId);
   const user = room?.users.get(userId);
@@ -654,10 +669,7 @@ export function canUserMutate(roomId, userId) {
 }
 
 function isOwnerConnection(room, userId, connectionId = null) {
-  if (!room || room.ownerId !== userId) return false;
-  if (!connectionId) return true;
-  refreshOwnerConnection(room);
-  return !room.ownerConnectionId || room.ownerConnectionId === connectionId;
+  return Boolean(room && room.ownerId === userId);
 }
 
 function songIdentity(source, id) {
@@ -701,7 +713,7 @@ export async function addToQueue(roomId, song, requestedByUser) {
 
   if (!room.current) {
     await withPlaybackLock(room, async () => {
-      if (!room.current) await playNextUnlocked(room);
+      if (!room.current) await playNextUnlocked(room, { allowFetchRandom: true });
     });
   }
 
@@ -800,76 +812,66 @@ async function withPlaybackLock(room, task) {
   }
 }
 
-async function playNextUnlocked(room) {
-  room.skipRequests = [];
-
-  if (room.queue.length === 0) {
-    const baselineCurrent = room.current;
-    let random = room.nextRandom;
-    room.nextRandom = null;
-
-    if (random && room.randomPlayedKeys.has(songIdentity(random.source, random.id))) {
-      random = null;
-    }
-
-    if (!random) {
-      random = await fetchRandomSong(() => getRandomExcludeKeys(room));
-    }
-
-    if (room.current !== baselineCurrent) {
-      if (random && !room.nextRandom && room.queue.length === 0) {
-        room.nextRandom = random;
-      }
-      return;
-    }
-
-    if (room.queue.length > 0) {
-      if (random && !room.nextRandom) {
-        room.nextRandom = random;
-      }
-      room.current = room.queue.shift();
-      room.isPlaying = true;
-      room.currentTime = 0;
-      room.startedAt = Date.now();
-      bumpPlaybackState(room);
-      return;
-    }
-
-    if (random) {
-      recordRandomPlayed(room, random);
-      room.current = {
-        queueId: `random-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ...random,
-        requestedBy: '随机推荐',
-        addedAt: Date.now(),
-      };
-      room.isPlaying = true;
-      room.currentTime = 0;
-      room.startedAt = Date.now();
-      bumpPlaybackState(room);
-      void ensureNextRandom(room);
-      return;
-    }
-
-    clearNextRandom(room);
-    room.current = null;
-    room.isPlaying = false;
-    room.currentTime = 0;
-    room.startedAt = null;
-    bumpPlaybackState(room);
-    return;
-  }
-
-  clearNextRandom(room);
-  room.current = room.queue.shift();
+function setCurrentSong(room, song) {
+  room.randomLoading = false;
+  room.current = song;
   room.isPlaying = true;
   room.currentTime = 0;
   room.startedAt = Date.now();
   bumpPlaybackState(room);
+  if (room.queue.length === 0) void ensureNextRandom(room);
 }
 
-async function playNext(room) {
-  return withPlaybackLock(room, () => playNextUnlocked(room));
+async function playNextUnlocked(room, options = {}) {
+  const { allowFetchRandom = false } = options;
+  room.skipRequests = [];
+
+  if (room.queue.length > 0) {
+    clearNextRandom(room);
+    setCurrentSong(room, room.queue.shift());
+    return;
+  }
+
+  let random = room.nextRandom;
+  room.nextRandom = null;
+
+  if (random && room.randomPlayedKeys.has(songIdentity(random.source, random.id))) {
+    random = null;
+  }
+
+  if (!random && allowFetchRandom) {
+    random = await fetchRandomSong(() => getRandomExcludeKeys(room));
+  }
+
+  if (room.queue.length > 0) {
+    if (random && !room.nextRandom) room.nextRandom = random;
+    setCurrentSong(room, room.queue.shift());
+    return;
+  }
+
+  if (random) {
+    recordRandomPlayed(room, random);
+    setCurrentSong(room, {
+      queueId: `random-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ...random,
+      requestedBy: '随机推荐',
+      addedAt: Date.now(),
+    });
+    void ensureNextRandom(room);
+    return;
+  }
+
+  clearNextRandom(room);
+  room.current = null;
+  room.isPlaying = false;
+  room.currentTime = 0;
+  room.startedAt = null;
+  room.randomLoading = true;
+  bumpPlaybackState(room);
+}
+
+async function playNext(room, options = {}) {
+  return withPlaybackLock(room, () => playNextUnlocked(room, options));
 }
 
 export async function ensurePlayback(roomId) {
@@ -883,7 +885,7 @@ export async function ensurePlayback(roomId) {
   room.randomLoading = true;
   try {
     await withPlaybackLock(room, async () => {
-      if (!room.current) await playNextUnlocked(room);
+      if (!room.current) await playNextUnlocked(room, { allowFetchRandom: true });
     });
   } finally {
     room.randomLoading = false;
@@ -907,7 +909,7 @@ export async function skipSong(roomId, socketId, connectionId = null) {
   if (!room) return { error: '房间不存在' };
   if (!isOwnerConnection(room, socketId, connectionId)) return { error: '仅房主可切歌' };
 
-  await playNext(room);
+  await playNext(room, { allowFetchRandom: false });
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -922,29 +924,34 @@ export async function finishCurrentSong(roomId, socketId, connectionId, queueId)
   await withPlaybackLock(room, async () => {
     if (!room.current) return;
     if (queueId && room.current.queueId !== queueId) return;
-    await playNextUnlocked(room);
+    await playNextUnlocked(room, { allowFetchRandom: false });
   });
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
-export async function advancePlaybackIfEnded(roomId) {
+export async function advancePlaybackIfEnded(roomId, options = {}) {
   const room = rooms.get(roomId);
   if (!room?.current || !room.isPlaying) return null;
 
+  const { force = false, expectedQueueId = '' } = options;
+  if (expectedQueueId && room.current.queueId !== expectedQueueId) return null;
+
   const durationSec = getSongDurationSeconds(room.current);
-  if (durationSec <= 0) return null;
-  if (getPlaybackTime(room) < durationSec + AUTO_ADVANCE_GRACE_SEC) return null;
+  if (durationSec <= 0 && !force) return null;
+  if (!force && getPlaybackTime(room) < durationSec + AUTO_ADVANCE_GRACE_SEC) return null;
 
   if (room.autoAdvancePromise) return null;
 
   room.autoAdvancePromise = withPlaybackLock(room, async () => {
-    if (!room.current || !room.isPlaying) return serializeRoom(room);
+    if (!room.current || !room.isPlaying) return null;
+    if (expectedQueueId && room.current.queueId !== expectedQueueId) return null;
+
     const lockedDurationSec = getSongDurationSeconds(room.current);
-    if (lockedDurationSec <= 0 || getPlaybackTime(room) < lockedDurationSec + AUTO_ADVANCE_GRACE_SEC) {
-      return serializeRoom(room);
+    if (!force && (lockedDurationSec <= 0 || getPlaybackTime(room) < lockedDurationSec + AUTO_ADVANCE_GRACE_SEC)) {
+      return null;
     }
-    await playNextUnlocked(room);
+    await playNextUnlocked(room, { allowFetchRandom: false });
     persistRoom(room);
     return serializeRoom(room);
   });
@@ -999,7 +1006,7 @@ async function applyJumpToFront(room, queueId) {
   room.queue.unshift(song);
   if (!room.current) {
     await withPlaybackLock(room, async () => {
-      if (!room.current) await playNextUnlocked(room);
+      if (!room.current) await playNextUnlocked(room, { allowFetchRandom: true });
     });
   }
   return true;
@@ -1087,7 +1094,7 @@ export async function approveSkip(roomId, socketId, requestId, connectionId = nu
   if (reqIdx === -1) return { error: '申请不存在' };
 
   room.skipRequests.splice(reqIdx, 1);
-  await playNext(room);
+  await playNext(room, { allowFetchRandom: false });
 
   persistRoom(room);
   return { room: serializeRoom(room) };
@@ -1170,6 +1177,7 @@ function serializeUser(user) {
     nickname: user.nickname,
     readOnly: user.readOnly,
     joinedAt: user.joinedAt,
+    location: user.location || '',
   };
 }
 

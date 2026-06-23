@@ -15,7 +15,7 @@ import {
   seedPlaybackFromRoom,
   resetPlaybackScheduling,
 } from '../lib/playbackSchedule';
-import { getClientId, rememberClientId } from '../lib/clientId';
+import { getClientId, getClientToken, rememberClientIdentity } from '../lib/clientId';
 
 
 
@@ -24,8 +24,6 @@ let socketListenersAttached = false;
 let socketConnectRequested = false;
 
 const SOCKET_ACK_TIMEOUT_MS = 8000;
-const CLIENT_TOKEN_KEY = 'openmusic_client_token';
-let currentClientToken: string | null = null;
 
 type JoinSession = {
   roomId: string;
@@ -58,26 +56,6 @@ function getSocket(): Socket {
 
 }
 
-function getClientToken() {
-  if (currentClientToken) return currentClientToken;
-  try {
-    currentClientToken = sessionStorage.getItem(CLIENT_TOKEN_KEY);
-    return currentClientToken || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function rememberClientIdentity(clientId?: string, clientToken?: string) {
-  if (!clientId || !clientToken) return;
-  rememberClientId(clientId);
-  currentClientToken = clientToken;
-  try {
-    sessionStorage.setItem(CLIENT_TOKEN_KEY, clientToken);
-  } catch {
-    // sessionStorage may be unavailable.
-  }
-}
 
 function emitWithAck<TResponse>(
   event: string,
@@ -168,11 +146,7 @@ export function useSocket() {
 
     const onRoomUpdate = (room: RoomState) => {
       const { mySocketId, myConnectionId } = useRoomStore.getState();
-      const isOwner = Boolean(
-        mySocketId
-        && room.ownerId === mySocketId
-        && (!room.ownerConnectionId || room.ownerConnectionId === myConnectionId),
-      );
+      const isOwner = Boolean(mySocketId && room.ownerId === mySocketId);
 
       useRoomStore.getState().setRoom(room);
 
@@ -447,11 +421,7 @@ export function useSocket() {
       if (res.success && res.room) {
         setRoom(res.room);
         const { mySocketId, myConnectionId } = useRoomStore.getState();
-        const nextIsOwner = Boolean(
-          mySocketId
-          && res.room!.ownerId === mySocketId
-          && (!res.room!.ownerConnectionId || res.room!.ownerConnectionId === myConnectionId),
-        );
+        const nextIsOwner = Boolean(mySocketId && res.room!.ownerId === mySocketId);
         setConnectionInfo(mySocketId, nextIsOwner, myConnectionId);
       }
       return res;
@@ -515,4 +485,3 @@ export function useSocket() {
   };
 
 }
-

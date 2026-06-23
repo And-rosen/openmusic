@@ -26,6 +26,7 @@ export interface RoomUser {
   nickname: string;
   readOnly?: boolean;
   joinedAt: number;
+  location?: string;
 }
 
 export interface JumpRequest {

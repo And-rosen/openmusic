@@ -53,6 +53,17 @@ export function resetPlaybackStateCache(): void {
   clientState.localVersion = 0;
 }
 
+export function optimisticSeekPosition(
+  roomId: string,
+  trackId: string,
+  positionSec: number,
+  isPlaying: boolean,
+): PlaybackState {
+  const version = clientState.localVersion;
+  const state = playbackStateFromRoom(roomId, trackId, isPlaying, positionSec, version);
+  applyPlaybackState(state);
+  return state;
+}
 export function playbackStateFromRoom(
   roomId: string,
   trackId: string,

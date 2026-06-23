@@ -7,6 +7,7 @@ import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import {
   isTrustedMediaDurationSeconds,
   resolveAutoSkipThresholdSeconds,
+  resolveDisplayDurationSeconds,
   resolveReferenceDurationSeconds,
 } from '../hooks/useTrackDuration';
 import type { QueueItem } from '../types';
@@ -29,6 +30,7 @@ import {
 import { prefetchQueueSongs, rememberSongUrl, resolveSongUrl } from '../lib/songPreloadCache';
 import { waitForAudioMinimumReady } from '../lib/audioReady';
 import { applyFollowerSync, applyVisibilityResume, markVisibilityResume } from '../lib/playbackSync';
+import { getClientPlaybackState, optimisticSeekPosition } from '../lib/playbackState';
 
 let audioListenersAttached = false;
 
@@ -39,6 +41,7 @@ interface AudioRuntime {
   audioRef: MutableRefObject<HTMLAudioElement | null>;
   readyTrackKey: MutableRefObject<string | null>;
   lastTrackKey: MutableRefObject<string | null>;
+  endedTrackKey: MutableRefObject<string | null>;
   skippingRef: MutableRefObject<boolean>;
   errorRetries: MutableRefObject<number>;
   requestSkip: () => void;
@@ -68,11 +71,15 @@ function capSeekTime(time: number, song: QueueItem | null | undefined, mediaDur:
   const sources = durationSources();
   const referenceDur = song ? resolveReferenceDurationSeconds(song, sources) : 0;
   const fileDur = isTrustedMediaDurationSeconds(mediaDur, referenceDur) ? mediaDur : 0;
-  const capBase = song
-    ? resolveAutoSkipThresholdSeconds(song, sources, fileDur)
-    : fileDur;
-  const cap = capBase > 0 ? capBase - 0.25 : time;
+  const displayDur = song ? resolveDisplayDurationSeconds(song, sources) : fileDur;
+  const capBase = displayDur || fileDur || (song ? resolveAutoSkipThresholdSeconds(song, sources, fileDur) : 0);
+  const cap = capBase > 0 ? capBase - 0.05 : time;
   return Math.max(0, Math.min(time, cap));
+}
+
+function playbackStateMatchesCurrentTrack(song: QueueItem): boolean {
+  const state = getClientPlaybackState();
+  return !state?.trackId || state.trackId === song.queueId;
 }
 
 function syncMediaDuration(audio: HTMLAudioElement, song: QueueItem, trackKey: string) {
@@ -106,6 +113,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   const lastTrackKey = useRef<string | null>(null);
   const readyTrackKey = useRef<string | null>(null);
+  const endedTrackKey = useRef<string | null>(null);
   const loadGeneration = useRef(0);
   const skippingRef = useRef(false);
   const justSkippedRef = useRef(false);
@@ -167,16 +175,17 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const applySync = useCallback((
     options: { forceZero?: boolean; forceTime?: number } = {},
   ) => {
-    if (typeof document !== 'undefined' && document.hidden) return;
     controller.enqueue(async () => {
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || skippingRef.current) return;
       if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
+      if (endedTrackKey.current === trackKeyOf(liveRoom.current)) return;
+
+      const song = liveRoom.current;
+      if (!playbackStateMatchesCurrentTrack(song)) return;
 
       const audio = controller.audio;
       if (!audio.src) return;
-
-      const song = liveRoom.current;
       const result = await applyFollowerSync(audio, {
         song,
         capTime: (time, mediaDur) => capSeekTime(time, song, mediaDur),
@@ -199,11 +208,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || skippingRef.current) return;
       if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
+      if (endedTrackKey.current === trackKeyOf(liveRoom.current)) return;
+
+      const song = liveRoom.current;
+      if (!playbackStateMatchesCurrentTrack(song)) return;
 
       const audio = controller.audio;
       if (!audio.src) return;
-
-      const song = liveRoom.current;
       const result = await applyVisibilityResume(audio, {
         song,
         capTime: (time, mediaDur) => capSeekTime(time, song, mediaDur),
@@ -247,6 +258,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       audioRef,
       readyTrackKey,
       lastTrackKey,
+      endedTrackKey,
       skippingRef,
       errorRetries,
       requestSkip,
@@ -262,9 +274,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         const runtime = activeAudioRuntime;
         if (!runtime) return;
         const live = useRoomStore.getState();
-        if (!live.isOwner || !live.room?.current) return;
-        if (runtime.readyTrackKey.current !== trackKeyOf(live.room.current)) return;
-        runtime.finishSong(live.room.current.queueId);
+        const current = live.room?.current;
+        if (!current) return;
+        const trackKey = trackKeyOf(current);
+        if (runtime.readyTrackKey.current !== trackKey) return;
+        runtime.endedTrackKey.current = trackKey;
+        audio.pause();
+        if (live.isOwner) {
+          runtime.finishSong(current.queueId);
+        }
       });
 
       audio.addEventListener('error', () => {
@@ -367,6 +385,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       });
       lastTrackKey.current = null;
       readyTrackKey.current = null;
+      endedTrackKey.current = null;
       prevQueueIdRef.current = null;
       errorRetries.current = 0;
       setTrackLoading(false);
@@ -379,10 +398,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     if (prevQueueIdRef.current && prevQueueIdRef.current !== current.queueId) {
       justSkippedRef.current = true;
+      endedTrackKey.current = null;
       enqueuePause();
       snapSmoothPlaybackTime(0);
     }
     prevQueueIdRef.current = current.queueId;
+    if (endedTrackKey.current && endedTrackKey.current !== trackKey) {
+      endedTrackKey.current = null;
+    }
 
     if (readyTrackKey.current === trackKey) {
       return;
@@ -530,10 +553,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const liveRoom = useRoomStore.getState().room;
     if (!liveRoom?.current) return;
     if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
+    if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
     if (skippingRef.current) return;
 
     const forceZero = justSkippedRef.current;
     justSkippedRef.current = false;
+    if (!forceZero && endedTrackKey.current === trackKeyOf(liveRoom.current)) return;
 
     applySync({ forceZero });
   }, [playbackVersion, trackLoading, applySync]);
@@ -549,6 +574,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       if (skippingRef.current || controller.isRunning) return;
       if (useAudioStore.getState().trackLoading) return;
       if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
+      if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
+      if (endedTrackKey.current === trackKeyOf(liveRoom.current)) return;
       if (!controller.audio.src) return;
       applySync();
     }, CALIBRATION_INTERVAL_MS);
@@ -577,6 +604,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current) return;
       if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
+      if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
+      if (endedTrackKey.current === trackKeyOf(liveRoom.current)) return;
       if (useAudioStore.getState().trackLoading || skippingRef.current) return;
       if (!controller.audio.src) return;
 
@@ -605,14 +634,22 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   const handleSeek = useCallback((time: number) => {
     const live = useRoomStore.getState().room;
-    seek(time);
-    if (readyTrackKey.current) {
-      applySync({ forceTime: time });
-      if (live) {
-        useRoomStore.getState().setRoom({ ...live, currentTime: time });
-      }
+    const current = live?.current;
+    if (!live || !current) return;
+
+    const capped = capSeekTime(time, current, controller.audio.duration);
+    endedTrackKey.current = null;
+    const optimistic = optimisticSeekPosition(live.id, current.queueId, capped, live.isPlaying);
+    useAudioStore.getState().setPlaybackVersion(optimistic.version);
+    snapSmoothPlaybackTime(capped);
+    useRoomStore.getState().setRoom({ ...live, currentTime: capped });
+
+    if (readyTrackKey.current === trackKeyOf(current) && controller.audio.src) {
+      controller.audio.currentTime = capped;
+      applySync({ forceTime: capped });
     }
-  }, [seek, applySync]);
+    seek(capped);
+  }, [controller, seek, applySync]);
 
   useEffect(() => {
     setSeekPlayback(handleSeek);
@@ -633,6 +670,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     onWeChatBridgeReady(() => {
       const liveRoom = useRoomStore.getState().room;
       if (!controller.audio.src || !liveRoom?.current || !liveRoom.isPlaying) return;
+      if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
       if (useAudioStore.getState().trackLoading || skippingRef.current) return;
       applySync();
     });
@@ -662,6 +700,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       if (skippingRef.current || controller.isRunning) return;
       if (!controller.audio.src || !controller.audio.paused) return;
       if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
+      if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
+      if (endedTrackKey.current === trackKeyOf(liveRoom.current)) return;
 
       applySync();
     };

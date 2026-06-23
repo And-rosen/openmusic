@@ -32,6 +32,7 @@ import SongResultList from '../components/SongResultList';
 import SearchFilterSelect from '../components/SearchFilterSelect';
 import SearchSkeleton from '../components/SearchSkeleton';
 import PlaylistImportModal from '../components/PlaylistImportModal';
+import NeteaseToplistModal from '../components/NeteaseToplistModal';
 import ChatPanel from '../components/ChatPanel';
 import HotSongPanel from '../components/HotSongPanel';
 
@@ -96,6 +97,7 @@ export default function Room() {
   const [searchedKeyword, setSearchedKeyword] = useState('');
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
+  const [neteaseToplistOpen, setNeteaseToplistOpen] = useState(false);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [hotRefreshKey, setHotRefreshKey] = useState(0);
@@ -460,13 +462,13 @@ export default function Room() {
 
                 className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
 
-                title="电视投屏"
+                title="TV歌词"
 
               >
 
                 {tvCopied ? <Check className="w-4 h-4 text-green-400" /> : <Tv className="w-4 h-4" />}
 
-                <span className="hidden sm:inline">{tvCopied ? '已复制' : '电视投屏'}</span>
+                <span className="hidden sm:inline">{tvCopied ? '已复制' : 'TV歌词'}</span>
 
               </button>
 
@@ -542,13 +544,22 @@ export default function Room() {
                   <p className="text-xs text-netease-muted min-w-0">
                     同时搜索 {sources.filter((s) => s.supportsSearch).map((s) => s.shortName).join('、')}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setPlaylistImportOpen(true)}
-                    className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap flex-shrink-0"
-                  >
-                    导入歌单
-                  </button>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setNeteaseToplistOpen(true)}
+                      className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                    >
+                      网易云热榜
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPlaylistImportOpen(true)}
+                      className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                    >
+                      导入歌单
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -682,6 +693,15 @@ export default function Room() {
           qqImportEnabled={qqImportEnabled}
           onClose={() => setPlaylistImportOpen(false)}
           onImport={handlePlaylistImport}
+        />
+      )}
+
+      {neteaseToplistOpen && (
+        <NeteaseToplistModal
+          open={neteaseToplistOpen}
+          addingId={addingId}
+          onClose={() => setNeteaseToplistOpen(false)}
+          onAdd={handleAdd}
         />
       )}
 

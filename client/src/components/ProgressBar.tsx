@@ -25,6 +25,7 @@ export default function ProgressBar({
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const releaseTimer = useRef<number | null>(null);
   const [dragProgress, setDragProgress] = useState<number | null>(null);
 
   const calcRatio = useCallback((clientX: number) => {
@@ -34,9 +35,16 @@ export default function ProgressBar({
     return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
   }, []);
 
+  const clearReleaseTimer = useCallback(() => {
+    if (releaseTimer.current == null) return;
+    window.clearTimeout(releaseTimer.current);
+    releaseTimer.current = null;
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || duration <= 0) return;
     dragging.current = true;
+    clearReleaseTimer();
     e.currentTarget.setPointerCapture(e.pointerId);
     setDragProgress(calcRatio(e.clientX) * 100);
   };
@@ -50,7 +58,13 @@ export default function ProgressBar({
       if (!dragging.current) return;
       dragging.current = false;
       const ratio = calcRatio(e.clientX);
-      setDragProgress(null);
+      const nextProgress = ratio * 100;
+      setDragProgress(nextProgress);
+      clearReleaseTimer();
+      releaseTimer.current = window.setTimeout(() => {
+        releaseTimer.current = null;
+        setDragProgress(null);
+      }, 1200);
       if (duration > 0) onSeek(ratio * duration);
     };
     window.addEventListener('pointermove', onMove);
@@ -59,9 +73,18 @@ export default function ProgressBar({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [calcRatio, duration, onSeek]);
+  }, [calcRatio, clearReleaseTimer, duration, onSeek]);
 
-  const displayProgress = Math.min(100, dragProgress ?? progress);
+  useEffect(() => {
+    if (dragging.current || dragProgress == null) return;
+    if (Math.abs(progress - dragProgress) > 0.75) return;
+    clearReleaseTimer();
+    setDragProgress(null);
+  }, [clearReleaseTimer, dragProgress, progress]);
+
+  useEffect(() => () => clearReleaseTimer(), [clearReleaseTimer]);
+
+  const displayProgress = Math.max(0, Math.min(100, dragProgress ?? progress));
 
   return (
     <div

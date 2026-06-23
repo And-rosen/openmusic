@@ -136,6 +136,35 @@ export function filterDisplayLyrics(lines: import('../../types').LyricLine[]): i
   });
 }
 
+export function getActiveLyricPair(
+  lines: import('../../types').LyricLine[],
+  currentTime: number,
+): { current: string | null; next: string | null } {
+  const displayLines = filterDisplayLyrics(lines);
+  if (displayLines.length === 0) return { current: null, next: null };
+
+  const activeIndex = displayLines.findIndex((line, i) => {
+    const next = displayLines[i + 1];
+    return currentTime >= line.time && (!next || currentTime < next.time);
+  });
+
+  if (activeIndex >= 0) {
+    return {
+      current: displayLines[activeIndex].text,
+      next: displayLines[activeIndex + 1]?.text ?? null,
+    };
+  }
+
+  if (currentTime < displayLines[0].time) {
+    return { current: null, next: displayLines[0].text };
+  }
+
+  return {
+    current: displayLines[displayLines.length - 1].text,
+    next: null,
+  };
+}
+
 /** 歌词结束后常见纯音乐尾奏预留（秒） */
 const LRC_TAIL_PADDING_SEC = 20;
 
