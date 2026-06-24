@@ -53,6 +53,7 @@ export default function ChatPanel() {
   const composingRef = useRef(false);
   const roomIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
+  const mentionQueryRef = useRef('');
 
   const mutedSet = useMemo(() => new Set(room?.mutedUserIds || []), [room?.mutedUserIds]);
   const myUserId = mySocketId || getClientId();
@@ -83,10 +84,15 @@ export default function ChatPanel() {
   };
 
   const userMap = useMemo(() => new Map((room?.users || []).map((user) => [user.id, user])), [room?.users]);
+  const [mentionQuery, setMentionQuery] = useState('');
   const mentionUsers = useMemo(() => {
     const myUserId = mySocketId || getClientId();
-    return (room?.users || []).filter((user) => user.id !== myUserId).slice(0, 8);
-  }, [mySocketId, room?.users]);
+    const query = mentionQuery.trim().toLowerCase();
+    return (room?.users || [])
+      .filter((user) => user.id !== myUserId)
+      .filter((user) => !query || user.nickname.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [mentionQuery, mySocketId, room?.users]);
 
   useEffect(() => {
     if (!room?.id) return;
@@ -95,6 +101,8 @@ export default function ChatPanel() {
       stickToBottomRef.current = true;
       setReplyTo(null);
       setShowMentionPicker(false);
+      setMentionQuery('');
+      mentionQueryRef.current = '';
       setMentionIndex(0);
       notifiedMessageIdsRef.current.clear();
     }
@@ -173,25 +181,61 @@ export default function ChatPanel() {
 
   if (!room) return null;
 
+  const readEditorNode = (node: ChildNode): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+    if (!(node instanceof HTMLElement)) return '';
+    if (node.dataset.qqFaceId) return qqFaceToken(node.dataset.qqFaceId);
+    if (node.tagName === 'BR') return '';
+    return Array.from(node.childNodes).map(readEditorNode).join('');
+  };
+
+  const serializeEditorNodes = (nodes: Iterable<ChildNode>) => {
+    return Array.from(nodes).map(readEditorNode).join('');
+  };
+
   const serializeEditor = () => {
     const editor = inputRef.current;
     if (!editor) return text;
-    const readNode = (node: ChildNode): string => {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
-      if (!(node instanceof HTMLElement)) return '';
-      if (node.dataset.qqFaceId) return qqFaceToken(node.dataset.qqFaceId);
-      if (node.tagName === 'BR') return '';
-      return Array.from(node.childNodes).map(readNode).join('');
-    };
-    return Array.from(editor.childNodes).map(readNode).join('');
+    return serializeEditorNodes(editor.childNodes);
+  };
+
+  const getTextBeforeCursor = () => {
+    const editor = inputRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount) return serializeEditor();
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer)) return serializeEditor();
+    const preRange = document.createRange();
+    preRange.selectNodeContents(editor);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const container = document.createElement('div');
+    container.appendChild(preRange.cloneContents());
+    return serializeEditorNodes(container.childNodes);
+  };
+
+  const getActiveMentionQuery = (beforeCursor: string) => {
+    const match = beforeCursor.match(/@([^\s@]*)$/);
+    return match ? match[1] : null;
   };
 
   const syncEditorState = () => {
     const nextText = serializeEditor();
     setText(nextText);
-    const shouldShowMentions = nextText.endsWith('@') && mentionUsers.length > 0;
-    setShowMentionPicker(shouldShowMentions);
-    if (shouldShowMentions) setMentionIndex(0);
+    const activeQuery = getActiveMentionQuery(getTextBeforeCursor());
+    if (activeQuery === null) {
+      setShowMentionPicker(false);
+      setMentionQuery('');
+      mentionQueryRef.current = '';
+      return;
+    }
+    const queryChanged = mentionQueryRef.current !== activeQuery;
+    mentionQueryRef.current = activeQuery;
+    setMentionQuery(activeQuery);
+    const filtered = (room?.users || [])
+      .filter((user) => user.id !== (mySocketId || getClientId()))
+      .filter((user) => !activeQuery || user.nickname.toLowerCase().includes(activeQuery.toLowerCase()));
+    setShowMentionPicker(filtered.length > 0);
+    if (queryChanged) setMentionIndex(0);
   };
 
   const getSelectedTextLength = () => {
@@ -217,6 +261,8 @@ export default function ChatPanel() {
     if (inputRef.current) inputRef.current.textContent = '';
     setText('');
     setShowMentionPicker(false);
+    setMentionQuery('');
+    mentionQueryRef.current = '';
     setMentionIndex(0);
   };
 
@@ -253,17 +299,22 @@ export default function ChatPanel() {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  const handleAt = (user: RoomUser) => {
-    const currentText = serializeEditor();
-    if (currentText.endsWith('@')) {
-      const editor = inputRef.current;
-      if (editor?.lastChild?.nodeType === Node.TEXT_NODE) {
-        editor.lastChild.textContent = (editor.lastChild.textContent || '').slice(0, -1);
-      }
-      setText(serializeEditor());
+  const deleteTextBeforeCursor = (count: number) => {
+    const editor = inputRef.current;
+    if (!editor || count <= 0) return;
+    editor.focus();
+    for (let i = 0; i < count; i += 1) {
+      document.execCommand('delete', false, 'Backward');
     }
+  };
+
+  const handleAt = (user: RoomUser) => {
+    const partialMention = getTextBeforeCursor().match(/@([^\s@]*)$/);
+    if (partialMention) deleteTextBeforeCursor(partialMention[0].length);
     insertPlainText(`@${user.nickname} `);
     setShowMentionPicker(false);
+    setMentionQuery('');
+    mentionQueryRef.current = '';
     setMentionIndex(0);
     requestAnimationFrame(() => inputRef.current?.focus());
   };
