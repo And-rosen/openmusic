@@ -192,14 +192,19 @@ export default function ChatPanel() {
   const handleSend = async () => {
     const messageText = serializeEditor().trim();
     if (!messageText || sending) return;
-    setText(messageText);
+
+    const mentions = buildMentions(messageText);
+    const currentReplyTo = replyTo;
+
+    clearEditor();
+    setReplyTo(null);
     setSending(true);
     setError('');
-    const res = await sendChat(messageText, { mentions: buildMentions(messageText), replyTo });
-    if (res.success) {
-      clearEditor();
-      setReplyTo(null);
-    } else {
+
+    const res = await sendChat(messageText, { mentions, replyTo: currentReplyTo });
+    if (!res.success) {
+      insertPlainText(messageText);
+      setReplyTo(currentReplyTo);
       setError(res.error || '发送失败');
     }
     setSending(false);

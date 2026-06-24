@@ -414,16 +414,31 @@ export default function Home() {
       </main>
 
       {/* 底栏 */}
-      <footer className="relative z-10 flex-shrink-0 border-t border-white/5 py-3">
-        <div className="flex justify-center gap-6 sm:gap-10 text-white/25 text-xs">
-          <span className="flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5" />
-            多人实时同步
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Music className="w-3.5 h-3.5" />
-            三平台曲库
-          </span>
+      <footer className="relative z-10 flex-shrink-0 border-t border-white/5 py-3 px-4">
+        <div className="flex flex-col items-center gap-2.5">
+          <div className="flex justify-center gap-6 sm:gap-10 text-white/25 text-xs">
+            <span className="flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5" />
+              多人实时同步
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5" />
+              三平台曲库
+            </span>
+          </div>
+          <p className="flex flex-wrap items-center justify-center gap-1 text-xs text-white/35">
+            本网站由
+            <a
+              href="https://www.upyun.com/?utm_source=lianmeng&utm_medium=referral"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex opacity-80 hover:opacity-100 transition-opacity"
+              aria-label="又拍云"
+            >
+              <img src="/又拍云_logo5.png" alt="又拍云" className="h-6 w-auto" />
+            </a>
+            提供 CDN 加速 / 云存储服务
+          </p>
         </div>
       </footer>
 

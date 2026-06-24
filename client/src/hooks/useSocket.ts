@@ -19,6 +19,7 @@ import {
   resetPlaybackScheduling,
 } from '../lib/playbackSchedule';
 import { getClientId, getClientToken, rememberClientIdentity } from '../lib/clientId';
+import { mergeRoomState } from '../lib/mergeRoomState';
 import { debugLog, setDebugSocketProvider } from '../lib/debugTools';
 
 
@@ -88,6 +89,11 @@ function joinPayload(session: JoinSession) {
   };
 }
 
+function applyRoomSnapshot(room: RoomState, force = false) {
+  const current = useRoomStore.getState().room;
+  useRoomStore.getState().setRoom(force ? room : mergeRoomState(room, current));
+}
+
 function applyJoinSnapshot(room: RoomState, playbackState?: PlaybackState) {
   if (playbackState) {
     schedulePlaybackState(playbackState);
@@ -121,7 +127,7 @@ function rejoinLastRoom() {
       rejoinInFlight = false;
       if (err || !res?.success || !res.room) return;
 
-      useRoomStore.getState().setRoom(res.room);
+      applyRoomSnapshot(res.room, true);
       applyJoinSnapshot(res.room, res.playbackState);
       rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
       if (res.socketId) {
@@ -137,8 +143,6 @@ function rejoinLastRoom() {
 
 
 export function useSocket() {
-
-  const setRoom = useRoomStore((s) => s.setRoom);
 
   const setConnectionInfo = useRoomStore((s) => s.setConnectionInfo);
 
@@ -174,7 +178,7 @@ if (socketListenersAttached) return;
       const { mySocketId, myConnectionId } = useRoomStore.getState();
       const isOwner = Boolean(mySocketId && room.ownerId === mySocketId);
 
-      useRoomStore.getState().setRoom(room);
+      applyRoomSnapshot(room);
 
       if (mySocketId) {
         useRoomStore.getState().setConnectionInfo(mySocketId, isOwner, myConnectionId);
@@ -194,6 +198,7 @@ if (socketListenersAttached) return;
       if (!current) return;
 
       if (current.messages.some((m) => m.id === message.id)) return;
+      if (current.chatVisibleSince != null && message.timestamp < current.chatVisibleSince) return;
 
       useRoomStore.getState().setRoom({ ...current, messages: [...current.messages, message] });
 
@@ -241,7 +246,7 @@ if (socketListenersAttached) return;
       useRoomStore.getState().setConnectionInfo(useRoomStore.getState().mySocketId, false, null);
     });
 
-  }, [setRoom, setConnectionInfo, resetSession]);
+  }, [setConnectionInfo, resetSession]);
 
 
 
@@ -300,7 +305,7 @@ if (!connected.current && !socketConnectRequested) {
           if (res.success && res.room) {
             if (generation !== joinGeneration) return res;
             lastJoinSession = session;
-            setRoom(res.room);
+            applyRoomSnapshot(res.room, true);
             applyJoinSnapshot(res.room, res.playbackState);
             rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
 
@@ -317,7 +322,7 @@ if (!connected.current && !socketConnectRequested) {
 
     },
 
-    [connect, setRoom, setConnectionInfo],
+    [connect, setConnectionInfo],
 
   );
 
@@ -468,7 +473,7 @@ if (s.connected) {
     )
       .then((res) => {
         if (res.success && res.room) {
-          setRoom(res.room);
+          applyRoomSnapshot(res.room);
           const nextNickname = nickname.trim();
           useRoomStore.getState().setNickname(nextNickname);
           if (lastJoinSession) {
@@ -478,7 +483,7 @@ if (s.connected) {
         return res;
       });
 
-  }, [setRoom]);
+  }, []);
 
   const transferOwner = useCallback((userId: string): Promise<{ success: boolean; error?: string; message?: string }> => {
     return emitWithAck<{ success: boolean; error?: string; message?: string; room?: RoomState }>(
@@ -487,14 +492,14 @@ if (s.connected) {
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
-        setRoom(res.room);
+        applyRoomSnapshot(res.room);
         const { mySocketId, myConnectionId } = useRoomStore.getState();
         const nextIsOwner = Boolean(mySocketId && res.room!.ownerId === mySocketId);
         setConnectionInfo(mySocketId, nextIsOwner, myConnectionId);
       }
       return res;
     });
-  }, [setRoom, setConnectionInfo]);
+  }, [setConnectionInfo]);
 
   const kickUser = useCallback((userId: string): Promise<{ success: boolean; error?: string; message?: string }> => {
     return emitWithAck<{ success: boolean; error?: string; message?: string; room?: RoomState }>(
@@ -503,11 +508,11 @@ if (s.connected) {
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
-        setRoom(res.room);
+        applyRoomSnapshot(res.room);
       }
       return res;
     });
-  }, [setRoom]);
+  }, []);
 
 
 

@@ -270,11 +270,14 @@ function resolveExcludeKeys(excludeKeys) {
 
 /** 队列为空时随机推荐（迟言 wyrp 网易云热评） */
 export async function fetchRandomSong(excludeKeys = new Set()) {
+  // 随机歌曲允许重复，不再按已播记录排除
+  // const exclude = resolveExcludeKeys(excludeKeys);
+  // const maxRetries = Math.max(MAX_RANDOM_RETRIES, Math.min(exclude.size, 60));
   for (let i = 0; i < MAX_RANDOM_RETRIES; i++) {
     const song = await fetchRandomSongOnce();
     if (!song) continue;
     if (!shouldPlayRandomSong(song.name)) continue;
-    if (resolveExcludeKeys(excludeKeys).has(randomSongKey(song))) continue;
+    // if (exclude.has(randomSongKey(song))) continue;
 
     const { raw, ...safeSong } = song;
     const duration = await resolveRandomDurationMs(safeSong, raw);

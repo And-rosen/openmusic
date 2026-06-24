@@ -14,6 +14,7 @@ const generateId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 
 const ROOM_EMPTY_TTL_MS = 10 * 60 * 1000;
 const MAX_QUEUE_LENGTH = 200;
+const MAX_CHAT_MESSAGES = 300;
 const MAX_SONG_HISTORY = 150;
 const MAX_RANDOM_HISTORY = 200;
 const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
@@ -85,7 +86,8 @@ function snapshotRoomForStorage(room) {
     currentTime: getPlaybackTime(room),
     playbackVersion: room.playbackVersion ?? 0,
     playbackUpdatedAt: room.playbackUpdatedAt ?? Date.now(),
-    messages: room.messages.slice(-100),
+    messages: room.messages.slice(-MAX_CHAT_MESSAGES),
+    knownUserIds: Array.from(room.knownUserIds || []),
     songHistory: (room.songHistory || []).slice(-MAX_SONG_HISTORY),
     jumpRequests: room.jumpRequests,
     skipRequests: room.skipRequests,
@@ -104,6 +106,7 @@ function restoreRoomFromStorage(data) {
   room.playbackVersion = data.playbackVersion ?? 0;
   room.playbackUpdatedAt = data.playbackUpdatedAt ?? Date.now();
   room.messages = data.messages || [];
+  room.knownUserIds = new Set(data.knownUserIds || []);
   room.songHistory = Array.isArray(data.songHistory) ? data.songHistory.slice(-MAX_SONG_HISTORY) : [];
   room.jumpRequests = data.jumpRequests || [];
   room.skipRequests = data.skipRequests || [];
@@ -237,6 +240,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     jumpRequests: [],
     skipRequests: [],
     messages: [],
+    knownUserIds: new Set(),
     songHistory: [],
     randomPlayedKeys: new Set(),
     nextRandom: null,
@@ -438,6 +442,14 @@ export function addUser(roomId, userId, nickname, options = {}) {
 
   const existing = room.users.get(userId);
   const connectionIds = normalizeConnectionIds(existing, options.connectionId || null);
+  if (!room.knownUserIds) room.knownUserIds = new Set();
+  const isReturningUser = room.knownUserIds.has(userId);
+  const hasSpokenInHistory = room.messages.some((message) => message.userId === userId);
+  const chatVisibleSince = isReturningUser || hasSpokenInHistory
+    ? null
+    : Date.now();
+  room.knownUserIds.add(userId);
+
   room.users.set(userId, {
     id: userId,
     nickname: normalizeNickname(nickname) || existing?.nickname || getDefaultNickname(room),
@@ -446,6 +458,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
     connectionId: options.connectionId || null,
     connectionIds,
     location: String(options.location || existing?.location || '').trim().slice(0, 12),
+    chatVisibleSince,
   });
 
   reassignOrphanQueueOwnership(
@@ -465,7 +478,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
 
   persistRoom(room);
   invalidateRoomsListCache();
-  return serializeRoom(room);
+  return serializeRoom(room, { forUserId: userId });
 }
 
 function normalizeNickname(nickname) {
@@ -798,35 +811,49 @@ export function removeFromQueue(roomId, socketId, queueId) {
   return { room: serializeRoom(room) };
 }
 
-function trimRandomHistory(room) {
-  if (room.randomPlayedKeys.size <= MAX_RANDOM_HISTORY) return;
-  const excess = room.randomPlayedKeys.size - MAX_RANDOM_HISTORY;
-  const iter = room.randomPlayedKeys.values();
-  for (let i = 0; i < excess; i++) {
-    const key = iter.next().value;
-    if (key) room.randomPlayedKeys.delete(key);
-  }
-}
+// function trimRandomHistory(room) {
+//   if (room.randomPlayedKeys.size <= MAX_RANDOM_HISTORY) return;
+//   const excess = room.randomPlayedKeys.size - MAX_RANDOM_HISTORY;
+//   const iter = room.randomPlayedKeys.values();
+//   for (let i = 0; i < excess; i++) {
+//     const key = iter.next().value;
+//     if (key) room.randomPlayedKeys.delete(key);
+//   }
+// }
 
-function recordRandomPlayed(room, song) {
-  room.randomPlayedKeys.add(songIdentity(song.source, song.id));
-  trimRandomHistory(room);
-}
+// function recordRandomPlayed(room, song) {
+//   room.randomPlayedKeys.add(songIdentity(song.source, song.id));
+//   trimRandomHistory(room);
+// }
 
-function getRandomExcludeKeys(room) {
-  const exclude = new Set(room.randomPlayedKeys);
-  if (room.current?.requestedBy === '随机推荐') {
-    exclude.add(songIdentity(room.current.source, room.current.id));
-  }
-  if (room.nextRandom) {
-    exclude.add(songIdentity(room.nextRandom.source, room.nextRandom.id));
-  }
-  return exclude;
-}
+// function getRandomExcludeKeys(room) {
+//   const exclude = new Set(room.randomPlayedKeys);
+//   if (room.current?.requestedBy === '随机推荐') {
+//     exclude.add(songIdentity(room.current.source, room.current.id));
+//   }
+//   if (room.nextRandom) {
+//     exclude.add(songIdentity(room.nextRandom.source, room.nextRandom.id));
+//   }
+//   return exclude;
+// }
 
 function clearNextRandom(room) {
   room.nextRandom = null;
   room.nextRandomPromise = null;
+}
+
+// function trimRandomPlayedKeys(room, removeCount) {
+//   if (room.randomPlayedKeys.size === 0) return;
+//   const keys = Array.from(room.randomPlayedKeys);
+//   const count = removeCount ?? Math.max(50, Math.ceil(keys.length / 2));
+//   for (let i = 0; i < Math.min(count, keys.length); i++) {
+//     room.randomPlayedKeys.delete(keys[i]);
+//   }
+// }
+
+async function fetchRandomForRoom(room) {
+  void room;
+  return fetchRandomSong();
 }
 
 async function ensureNextRandom(room) {
@@ -839,11 +866,11 @@ async function ensureNextRandom(room) {
   room.nextRandomPromise = (async () => {
     try {
       for (let i = 0; i < MAX_RANDOM_PREFETCH_ATTEMPTS && room.queue.length === 0; i++) {
-        const song = await fetchRandomSong(() => getRandomExcludeKeys(room));
+        const song = await fetchRandomForRoom(room);
         if (!song) break;
 
-        const key = songIdentity(song.source, song.id);
-        if (room.randomPlayedKeys.has(key)) continue;
+        // const key = songIdentity(song.source, song.id);
+        // if (room.randomPlayedKeys.has(key)) continue;
 
         room.nextRandom = song;
         break;
@@ -897,15 +924,15 @@ async function playNextUnlocked(room, options = {}) {
   let random = room.nextRandom;
   room.nextRandom = null;
 
-  if (random && room.randomPlayedKeys.has(songIdentity(random.source, random.id))) {
-    random = null;
-  }
+  // if (random && room.randomPlayedKeys.has(songIdentity(random.source, random.id))) {
+  //   random = null;
+  // }
 
   const shouldFetchRandom = !random && (allowFetchRandom || room.queue.length === 0);
   if (shouldFetchRandom) {
     room.randomLoading = true;
     bumpPlaybackState(room);
-    random = await fetchRandomSong(() => getRandomExcludeKeys(room));
+    random = await fetchRandomForRoom(room);
   }
 
   if (room.queue.length > 0) {
@@ -915,7 +942,7 @@ async function playNextUnlocked(room, options = {}) {
   }
 
   if (random) {
-    recordRandomPlayed(room, random);
+    // recordRandomPlayed(room, random);
     setCurrentSong(room, {
       queueId: `random-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       ...random,
@@ -969,6 +996,22 @@ export async function ensurePlayback(roomId) {
   } finally {
     ensurePlaybackInflight.delete(roomId);
   }
+}
+
+const RANDOM_RETRY_COOLDOWN_MS = 2000;
+
+/** 房间卡在 randomLoading 时由定时任务触发重试 */
+export async function retryStuckRandomLoading(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || room.current || !room.randomLoading || room.users.size === 0) return null;
+
+  const now = Date.now();
+  if (room.lastRandomRetryAt && now - room.lastRandomRetryAt < RANDOM_RETRY_COOLDOWN_MS) {
+    return null;
+  }
+  room.lastRandomRetryAt = now;
+
+  return ensurePlayback(roomId);
 }
 
 /** 标记房间正在拉取随机歌曲（用于加入后立即向客户端反馈"加载中"） */
@@ -1214,8 +1257,8 @@ export function addChatMessage(roomId, userId, text, options = {}) {
   };
 
   room.messages.push(message);
-  if (room.messages.length > 100) {
-    room.messages.splice(0, room.messages.length - 100);
+  if (room.messages.length > MAX_CHAT_MESSAGES) {
+    room.messages.splice(0, room.messages.length - MAX_CHAT_MESSAGES);
   }
 
   persistRoom(room);
@@ -1305,8 +1348,18 @@ function serializeUser(user) {
   };
 }
 
-function serializeRoom(room) {
+function getMessagesForUser(room, userId) {
+  if (!userId) return room.messages;
+  const user = room.users.get(userId);
+  if (user?.chatVisibleSince) {
+    return room.messages.filter((message) => message.timestamp >= user.chatVisibleSince);
+  }
+  return room.messages;
+}
+
+function serializeRoom(room, options = {}) {
   repairPlaybackClock(room);
+  const forUser = options.forUserId ? room.users.get(options.forUserId) : null;
   return {
     id: room.id,
     name: room.name,
@@ -1322,7 +1375,8 @@ function serializeRoom(room) {
     userCount: room.users.size,
     jumpRequests: room.jumpRequests,
     skipRequests: room.skipRequests,
-    messages: room.messages,
+    messages: getMessagesForUser(room, options.forUserId),
+    chatVisibleSince: forUser?.chatVisibleSince ?? null,
     songHistory: room.songHistory || [],
     randomLoading: Boolean(room.randomLoading),
   };

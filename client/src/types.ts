@@ -93,6 +93,8 @@ export interface RoomState {
   jumpRequests: JumpRequest[];
   skipRequests: SkipRequest[];
   messages: ChatMessage[];
+  /** 非 null 时仅能看到该时间戳之后的消息（首次进入且未发言的新用户） */
+  chatVisibleSince?: number | null;
   songHistory?: SongHistoryItem[];
   /** 服务端正在为空队列拉取随机歌曲 */
   randomLoading?: boolean;

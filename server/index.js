@@ -24,6 +24,7 @@ import {
   skipSong,
   finishCurrentSong,
   ensurePlayback,
+  retryStuckRandomLoading,
   markRandomLoading,
   setPlaying,
   seekTo,
@@ -732,7 +733,13 @@ function emitRoomAndPlayback(roomId, room) {
 
   if (room?.randomLoading && !room.current) {
     ensurePlayback(roomId).then((nextRoom) => {
-      if (nextRoom?.current) emitRoomAndPlayback(roomId, nextRoom);
+      if (!nextRoom) return;
+      if (nextRoom.current) {
+        emitRoomAndPlayback(roomId, nextRoom);
+        return;
+      }
+      io.to(roomId).emit('room_update', nextRoom);
+      broadcastPlaybackState(roomId);
     }).catch((err) => {
       console.error('Ensure playback after loading state failed:', err.message);
     });
@@ -823,7 +830,10 @@ io.on('connection', (socket) => {
 
     // 无当前歌曲且队列为空时，加入后会异步拉取随机歌曲，先告知客户端"加载中"，
     // 避免播放条在随机歌曲到达前直接消失。
-    const roomPayload = markRandomLoading(id) || joinedRoom;
+    const loadingRoom = markRandomLoading(id);
+    const roomPayload = loadingRoom
+      ? { ...loadingRoom, messages: joinedRoom.messages, chatVisibleSince: joinedRoom.chatVisibleSince }
+      : joinedRoom;
     const joinInternal = getRoomInternal(id);
     const playbackState = joinInternal ? buildPlaybackState(joinInternal) : null;
 
@@ -1311,7 +1321,17 @@ async function checkAutoAdvance() {
   try {
     for (const roomId of listRoomIds()) {
       const internal = getRoomInternal(roomId);
-      if (!internal?.isPlaying || !internal.current || internal.users.size === 0) continue;
+      if (!internal || internal.users.size === 0) continue;
+
+      if (internal.randomLoading && !internal.current) {
+        const retried = await retryStuckRandomLoading(roomId);
+        if (retried) {
+          emitRoomAndPlayback(roomId, retried);
+        }
+        continue;
+      }
+
+      if (!internal.isPlaying || !internal.current) continue;
 
       const advanced = await advancePlaybackIfEnded(roomId);
       if (advanced) {
