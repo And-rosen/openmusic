@@ -59,7 +59,7 @@ import {
   searchKugouMusic,
   getKugouSongDetail,
 } from './cyapi.js';
-import { importNeteasePlaylist, importQqPlaylist } from './playlistImport.js';
+import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
 import { recordSongRequest, getHotSongs } from './songHotRank.js';
@@ -358,6 +358,30 @@ app.get('/api/music/toplist/netease', async (req, res) => {
   } catch (err) {
     console.error('Netease toplist error:', err.message);
     res.status(502).json({ error: err.message || '获取网易云热榜失败' });
+  }
+});
+
+app.get('/api/music/netease/playlists/meta', async (req, res) => {
+  if (!limitProxyRequest(`playlist-meta:${getRequestIp(req)}`)) {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+
+  const ids = String(req.query.ids || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+
+  if (ids.length === 0) {
+    return res.json({ playlists: [] });
+  }
+
+  try {
+    const playlists = await fetchNeteasePlaylistMetas(ids);
+    res.json({ playlists });
+  } catch (err) {
+    console.error('Netease playlist meta error:', err.message);
+    res.status(502).json({ error: '获取歌单信息失败' });
   }
 });
 

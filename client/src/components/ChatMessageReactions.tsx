@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { ChatReactionGroup } from '../types';
@@ -7,8 +7,10 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   ensureQQFacesLoaded,
   getInitialQQFaces,
+  getReactionPickerFaces,
   hasFullQQFaces,
   parseQQFaceToken,
+  PINNED_REACTION_FACE_IDS,
   QFaceLoadPriority,
   qqFaceToken,
   subscribeQQFaces,
@@ -16,6 +18,32 @@ import {
 } from '../lib/qface';
 
 const MAX_VISIBLE_GROUPS = 3;
+
+function ReactionFaceButton({
+  face,
+  onPick,
+}: {
+  face: QFaceItem;
+  onPick: (emoji: string) => void;
+}) {
+  return (
+    <button
+      key={face.id}
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => onPick(qqFaceToken(face.id))}
+      className="flex h-10 w-full items-center justify-center overflow-hidden rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
+      title={face.text}
+    >
+      <QFaceImage
+        id={face.id}
+        priority={QFaceLoadPriority.PANEL}
+        className="h-7 w-7 max-w-full object-contain"
+        placeholderClassName="h-7 w-7"
+      />
+    </button>
+  );
+}
 
 function ReactionEmoji({ emoji, className = 'h-4 w-4' }: { emoji: string; className?: string }) {
   const faceId = parseQQFaceToken(emoji);
@@ -35,29 +63,36 @@ function ReactionEmoji({ emoji, className = 'h-4 w-4' }: { emoji: string; classN
 interface ChatOverlayPortalProps {
   isMobileLayout: boolean;
   containerRef: RefObject<HTMLDivElement | null>;
+  overlayHostRef?: RefObject<HTMLDivElement | null>;
   onClose: () => void;
   ariaLabel: string;
   panelRef: RefObject<HTMLDivElement | null>;
   desktopPanelClassName: string;
   mobilePanelClassName: string;
   children: ReactNode;
+  /** 限制在聊天室容器内（不挂到 document.body） */
+  contained?: boolean;
 }
 
 function ChatOverlayPortal({
   isMobileLayout,
   containerRef,
+  overlayHostRef,
   onClose,
   ariaLabel,
   panelRef,
   desktopPanelClassName,
   mobilePanelClassName,
   children,
+  contained = false,
 }: ChatOverlayPortalProps) {
-  const container = containerRef.current;
-  if (!isMobileLayout && !container) return null;
+  const mountNode = contained
+    ? (overlayHostRef?.current ?? containerRef.current)
+    : (isMobileLayout ? document.body : containerRef.current);
+  if (!mountNode) return null;
 
   const overlay = isMobileLayout ? (
-    <div className="fixed inset-0 z-[60]">
+    <div className={`${contained ? 'absolute' : 'fixed'} inset-0 z-[60] pointer-events-auto`}>
       <button
         type="button"
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -69,7 +104,7 @@ function ChatOverlayPortal({
       </div>
     </div>
   ) : (
-    <div className="absolute inset-0 z-30 flex items-center justify-center p-3">
+    <div className="absolute inset-0 z-[60] flex items-center justify-center p-3 pointer-events-auto">
       <button
         type="button"
         className="absolute inset-0 bg-black/45"
@@ -82,7 +117,7 @@ function ChatOverlayPortal({
     </div>
   );
 
-  return createPortal(overlay, isMobileLayout ? document.body : container!);
+  return createPortal(overlay, mountNode);
 }
 
 function useOverlayDismiss(
@@ -90,7 +125,15 @@ function useOverlayDismiss(
   onClose: () => void,
   panelRef: RefObject<HTMLDivElement | null>,
   scrollRoot?: HTMLElement | null,
+  dismissOnScroll = true,
+  dismissOnPointerDownOutside = true,
 ) {
+  const openedAtRef = useRef(0);
+
+  useEffect(() => {
+    if (open) openedAtRef.current = Date.now();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -101,21 +144,22 @@ function useOverlayDismiss(
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open || !scrollRoot) return;
+    if (!open || !scrollRoot || !dismissOnScroll) return;
     const onScroll = () => onClose();
     scrollRoot.addEventListener('scroll', onScroll, { passive: true });
     return () => scrollRoot.removeEventListener('scroll', onScroll);
-  }, [open, scrollRoot, onClose]);
+  }, [open, scrollRoot, onClose, dismissOnScroll]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !dismissOnPointerDownOutside) return;
     const onPointerDown = (event: PointerEvent) => {
+      if (Date.now() - openedAtRef.current < 120) return;
       if (panelRef.current?.contains(event.target as Node)) return;
       onClose();
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [open, onClose]);
+  }, [open, onClose, dismissOnPointerDownOutside]);
 }
 
 interface ReactionDetailModalProps {
@@ -319,6 +363,7 @@ interface ChatReactionPickerProps {
   onPick: (emoji: string) => void;
   scrollRoot?: HTMLElement | null;
   containerRef: RefObject<HTMLDivElement | null>;
+  overlayHostRef?: RefObject<HTMLDivElement | null>;
 }
 
 export function ChatReactionPicker({
@@ -328,6 +373,7 @@ export function ChatReactionPicker({
   onPick,
   scrollRoot = null,
   containerRef,
+  overlayHostRef,
 }: ChatReactionPickerProps) {
   const isMobileLayout = useMediaQuery('(max-width: 1023px)');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -344,49 +390,62 @@ export function ChatReactionPicker({
     ensureQQFacesLoaded();
   }, [open]);
 
-  useOverlayDismiss(open, onClose, panelRef, scrollRoot);
+  // 仅通过遮罩 / Esc 关闭，避免新消息渲染或滚动时误触 document pointerdown
+  useOverlayDismiss(open, onClose, panelRef, scrollRoot, false, false);
+
+  const sortedFaces = useMemo(() => getReactionPickerFaces(faces), [faces]);
+  const pinnedFaces = sortedFaces.slice(0, PINNED_REACTION_FACE_IDS.length);
+  const restFaces = sortedFaces.slice(PINNED_REACTION_FACE_IDS.length);
 
   if (!open || disabled) return null;
-  if (!isMobileLayout && !containerRef.current) return null;
 
   return (
     <ChatOverlayPortal
       isMobileLayout={isMobileLayout}
       containerRef={containerRef}
+      overlayHostRef={overlayHostRef}
+      contained
       onClose={onClose}
       ariaLabel="关闭点评表情"
       panelRef={panelRef}
-      desktopPanelClassName="relative z-10 flex w-[min(240px,90%)] max-h-[min(72%,320px)] flex-col rounded-2xl border border-netease-border/70 bg-netease-dark/98 p-2 shadow-2xl backdrop-blur"
-      mobilePanelClassName="absolute inset-x-0 bottom-0 z-10 flex max-h-[min(55vh,360px)] flex-col rounded-t-2xl border-t border-netease-border/70 bg-netease-dark/98 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur"
+      desktopPanelClassName="relative z-10 box-border flex w-[min(280px,calc(100%-1.5rem))] max-h-[min(72%,360px)] flex-col overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/98 p-2.5 shadow-2xl backdrop-blur"
+      mobilePanelClassName="absolute inset-x-0 bottom-0 z-10 box-border flex max-h-[min(55%,360px)] flex-col overflow-hidden rounded-t-2xl border-t border-netease-border/70 bg-netease-dark/98 p-2.5 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur"
     >
-      <div className="mb-1.5 flex flex-shrink-0 items-center justify-between px-1">
+      <div className="mb-1.5 flex flex-shrink-0 items-center justify-between px-0.5">
         <span className="text-[11px] text-netease-muted">点评表情</span>
         <span className="text-[10px] text-netease-muted/60">
           {loadingFaces ? '正在加载…' : '点击选择'}
         </span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-4 gap-1 overflow-y-auto pr-0.5">
-        {faces.map((face) => (
-          <button
+      <div className="grid flex-shrink-0 grid-cols-4 gap-1">
+        {pinnedFaces.map((face) => (
+          <ReactionFaceButton
             key={face.id}
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              onPick(qqFaceToken(face.id));
+            face={face}
+            onPick={(emoji) => {
+              onPick(emoji);
               onClose();
             }}
-            className="flex h-10 items-center justify-center rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
-            title={face.text}
-          >
-            <QFaceImage
-              id={face.id}
-              priority={QFaceLoadPriority.PANEL}
-              className="h-7 w-auto max-w-8 object-contain"
-              placeholderClassName="h-7 w-7"
-            />
-          </button>
+          />
         ))}
       </div>
+      {restFaces.length > 0 && (
+        <>
+          <div className="my-1.5 flex-shrink-0 border-t border-white/10" />
+          <div className="grid min-h-0 flex-1 grid-cols-4 gap-1 overflow-y-auto overscroll-contain pb-0.5">
+            {restFaces.map((face) => (
+              <ReactionFaceButton
+                key={face.id}
+                face={face}
+                onPick={(emoji) => {
+                  onPick(emoji);
+                  onClose();
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </ChatOverlayPortal>
   );
 }

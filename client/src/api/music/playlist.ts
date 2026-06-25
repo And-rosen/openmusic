@@ -66,3 +66,14 @@ export async function searchNeteasePlaylists(
   }
   return data as NeteasePlaylistSearchResult;
 }
+
+export async function fetchNeteasePlaylistMetas(ids: string[]): Promise<NeteasePlaylistSearchItem[]> {
+  if (ids.length === 0) return [];
+  const params = new URLSearchParams({ ids: ids.join(',') });
+  const res = await fetchWithTimeout(`/api/music/netease/playlists/meta?${params.toString()}`, {}, 15000);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '获取歌单信息失败');
+  }
+  return Array.isArray(data.playlists) ? data.playlists : [];
+}

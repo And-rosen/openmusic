@@ -90,6 +90,7 @@ export default function ChatPanel() {
   const inputRef = useRef<HTMLDivElement>(null);
   const emojiPanelRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<HTMLDivElement>(null);
+  const chatOverlayHostRef = useRef<HTMLDivElement>(null);
   const emojiPickerPortalRef = useRef<HTMLDivElement>(null);
   const isMobileLayout = useMediaQuery('(max-width: 1023px)');
   const bindEmojiGridRef = (el: HTMLDivElement | null) => {
@@ -101,6 +102,10 @@ export default function ChatPanel() {
   const stickToBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
   const mentionQueryRef = useRef('');
+  const reactionPickerOpenRef = useRef(false);
+  const scrollBottomRafRef = useRef<number | null>(null);
+
+  reactionPickerOpenRef.current = reactionPickerMessageId !== null;
 
   const mutedSet = useMemo(() => new Set(room?.mutedUserIds || []), [room?.mutedUserIds]);
   const myUserId = mySocketId || getClientId();
@@ -157,12 +162,25 @@ export default function ChatPanel() {
 
   useEffect(() => {
     const el = chatScrollRoot;
-    if (!el) return;
-    const scrollToBottom = (behavior: ScrollBehavior) => requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior, block: 'end' }));
+    if (!el || reactionPickerOpenRef.current) {
+      if (scrollBottomRafRef.current != null) {
+        cancelAnimationFrame(scrollBottomRafRef.current);
+        scrollBottomRafRef.current = null;
+      }
+      return;
+    }
+    const scrollToBottom = (behavior: ScrollBehavior) => {
+      if (scrollBottomRafRef.current != null) cancelAnimationFrame(scrollBottomRafRef.current);
+      scrollBottomRafRef.current = requestAnimationFrame(() => {
+        scrollBottomRafRef.current = null;
+        if (reactionPickerOpenRef.current) return;
+        bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+      });
+    };
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (stickToBottomRef.current) scrollToBottom('instant');
     else if (distanceToBottom < 120) scrollToBottom('smooth');
-  }, [chatScrollRoot, messages.length, room?.id]);
+  }, [chatScrollRoot, messages.length, room?.id, reactionPickerMessageId]);
 
   useEffect(() => {
     const el = chatScrollRoot;
@@ -243,6 +261,7 @@ export default function ChatPanel() {
   useEffect(() => {
     if (!showEmoji) return;
     const handlePointerDown = (event: PointerEvent) => {
+      if (reactionPickerOpenRef.current) return;
       const target = event.target as Node;
       if (emojiPanelRef.current?.contains(target)) return;
       if (emojiPickerPortalRef.current?.contains(target)) return;
@@ -537,7 +556,7 @@ export default function ChatPanel() {
         ref={emojiPickerPortalRef}
         className="absolute inset-x-0 bottom-0 flex max-h-[min(55vh,360px)] flex-col rounded-t-2xl border-t border-netease-border/70 bg-netease-dark/98 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur"
       >
-        {renderEmojiPickerContent('grid min-h-0 flex-1 grid-cols-8 gap-1 overflow-y-auto pr-0.5')}
+        {renderEmojiPickerContent('grid min-h-0 flex-1 grid-cols-8 gap-0.5 overflow-y-auto overscroll-contain px-0.5 py-0.5')}
       </div>
     </div>
   ) : null;
@@ -695,6 +714,7 @@ export default function ChatPanel() {
                   <button
                     type="button"
                     disabled={chatMuted}
+                    onMouseDown={(event) => event.preventDefault()}
                     onClick={() => setReactionPickerMessageId((current) => (current === msg.id ? null : msg.id))}
                     className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-40"
                     title="点评表情"
@@ -709,11 +729,14 @@ export default function ChatPanel() {
         <div ref={bottomRef} />
       </div>
 
+      <div ref={chatOverlayHostRef} className="pointer-events-none absolute inset-0 z-30" />
+
       <ChatReactionPicker
         open={reactionPickerMessageId !== null}
         disabled={chatMuted}
         scrollRoot={chatScrollRoot}
         containerRef={chatPanelRef}
+        overlayHostRef={chatOverlayHostRef}
         onClose={() => setReactionPickerMessageId(null)}
         onPick={(emoji) => {
           if (reactionPickerMessageId) {
@@ -740,8 +763,8 @@ export default function ChatPanel() {
         {error && <p className="mb-1 text-xs text-netease-red">{error}</p>}
         <div className="relative flex items-center gap-2" ref={emojiPanelRef}>
           {showEmoji && !isMobileLayout && (
-            <div className="absolute bottom-full left-0 z-20 mb-2 w-72 rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-2 shadow-2xl backdrop-blur">
-              {renderEmojiPickerContent('grid max-h-64 grid-cols-8 gap-1 overflow-y-auto pr-0.5')}
+            <div className="absolute bottom-full left-0 z-20 mb-2 box-border w-full max-w-full rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-2 shadow-2xl backdrop-blur">
+              {renderEmojiPickerContent('grid max-h-64 grid-cols-8 gap-0.5 overflow-y-auto overscroll-contain px-0.5 py-0.5')}
             </div>
           )}
           <button

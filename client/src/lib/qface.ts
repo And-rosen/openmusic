@@ -23,6 +23,20 @@ interface QFaceManifestEntry {
 
 const POPULAR_FACE_IDS = ['0', '1', '2', '4', '5', '9', '13', '14', '21', '23', '27', '63'];
 
+/** 点评表情置顶：赞、踩、爱心、便便、菜刀、笑哭、拜托、略略略 */
+export const PINNED_REACTION_FACE_IDS = ['76', '77', '66', '59', '112', '182', '353', '395'] as const;
+
+const PINNED_REACTION_LABELS: Record<string, string> = {
+  '76': '/赞',
+  '77': '/踩',
+  '66': '/爱心',
+  '59': '/便便',
+  '112': '/菜刀',
+  '182': '/笑哭',
+  '353': '/拜托',
+  '395': '/略略略',
+};
+
 const POPULAR_LABELS: Record<string, string> = {
   '0': '/惊讶',
   '1': '/撇嘴',
@@ -77,7 +91,10 @@ function notifyFaceSubscribers(): void {
 }
 
 function warmupManifestFaces(): void {
-  requestQFaceImages(POPULAR_FACE_IDS, QFaceLoadPriority.MANIFEST);
+  requestQFaceImages(
+    [...new Set([...POPULAR_FACE_IDS, ...PINNED_REACTION_FACE_IDS])],
+    QFaceLoadPriority.MANIFEST,
+  );
 }
 
 async function fetchLocalManifest(): Promise<QFaceItem[]> {
@@ -162,6 +179,20 @@ export function qqFaceToken(id: string): string {
 
 export function getPopularReactionFaces(): QFaceItem[] {
   return buildPopularFaces();
+}
+
+export function getReactionPickerFaces(faces: QFaceItem[]): QFaceItem[] {
+  const byId = new Map(faces.map((face) => [face.id, face]));
+  const pinned = PINNED_REACTION_FACE_IDS.map(
+    (id) => byId.get(id) ?? {
+      id,
+      text: PINNED_REACTION_LABELS[id] || `/表情${id}`,
+      url: faceUrl(id),
+    },
+  );
+  const pinnedSet = new Set<string>(PINNED_REACTION_FACE_IDS);
+  const rest = faces.filter((face) => !pinnedSet.has(face.id));
+  return [...pinned, ...rest];
 }
 
 export function parseQQFaceToken(emoji: string): string | null {

@@ -37,9 +37,9 @@ import SourceBadge from '../components/SourceBadge';
 import SearchFilterSelect from '../components/SearchFilterSelect';
 import SearchSkeleton from '../components/SearchSkeleton';
 import PlaylistImportModal from '../components/PlaylistImportModal';
-import NeteaseToplistModal from '../components/NeteaseToplistModal';
 import ChatPanel from '../components/ChatPanel';
 import HotSongPanel from '../components/HotSongPanel';
+import RecommendedPlaylistsPanel from '../components/RecommendedPlaylistsPanel';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
@@ -165,7 +165,6 @@ export default function Room() {
   const [searchMode, setSearchMode] = useState<SearchMode>('song');
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
-  const [neteaseToplistOpen, setNeteaseToplistOpen] = useState(false);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
   const [playlistSearchResults, setPlaylistSearchResults] = useState<NeteasePlaylistSearchItem[]>([]);
   const [playlistSearchPage, setPlaylistSearchPage] = useState(1);
@@ -499,6 +498,10 @@ export default function Room() {
     }
   }, [showToast]);
 
+  const handleRecommendPlaylistSelect = useCallback(async (playlist: NeteasePlaylistSearchItem) => {
+    await handlePlaylistImport('netease', playlist.id);
+  }, [handlePlaylistImport]);
+
   const handleSearch = useCallback(() => {
     const keyword = query.trim();
     if (searchMode === 'playlist') {
@@ -800,7 +803,7 @@ export default function Room() {
 
       <header className="glass flex-shrink-0 z-30 border-b border-netease-border/50 px-3 sm:px-4 py-2.5 sm:py-3 safe-top">
 
-        <div className="max-w-7xl mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="max-w-[1480px] mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
 
           <div className="flex items-center justify-between gap-2 min-w-0">
 
@@ -945,45 +948,44 @@ export default function Room() {
 
 
 
-      <div className="flex-1 min-h-0 max-w-7xl mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden">
+      <div className="flex-1 min-h-0 max-w-[1480px] mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden">
 
-        <div className="flex flex-col lg:grid lg:grid-cols-[240px_1fr_300px] lg:h-full lg:min-h-0 gap-3 lg:gap-4">
+        <div className="flex flex-col lg:grid lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:h-full lg:min-h-0 gap-3 lg:gap-4">
 
-          {/* 点歌热榜 — 桌面左侧（仅 lg 挂载，避免与手机版重复请求） */}
+          {/* 左侧：点歌热榜 + 为你推荐 */}
           {isLgUp && (
-            <div className="flex flex-col order-0 lg:min-h-0 lg:overflow-hidden">
-              <HotSongPanel addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
+            <div className="order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 lg:h-full lg:grid lg:grid-rows-[minmax(0,28%)_minmax(0,1fr)]">
+              <div className="flex min-h-0 flex-col overflow-hidden border-b border-netease-border/50">
+                <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} limit={6} />
+              </div>
+              <div className="flex min-h-0 flex-col overflow-hidden">
+                <RecommendedPlaylistsPanel onSelectPlaylist={handleRecommendPlaylistSelect} />
+              </div>
             </div>
           )}
 
-          {/* 点歌搜索 — 中间；手机端热榜在上方 */}
-          <div className="min-w-0 order-1 flex flex-col lg:min-h-0 lg:h-full lg:overflow-hidden">
+          {/* 中间：搜索 + 播放队列 */}
+          <div className="order-1 flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-hidden">
             {!isLgUp && (
-              <div className="mb-3">
+              <div className="mb-3 space-y-3">
                 <HotSongPanel compact addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
+                <RecommendedPlaylistsPanel compact onSelectPlaylist={handleRecommendPlaylistSelect} />
               </div>
             )}
 
             <div className="flex-shrink-0">
               <JumpRequestBanner />
               {searchBar}
-              {searchableCount > 0 && (
-                <div className="mb-2 flex items-center justify-between gap-2 px-1 sm:mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setNeteaseToplistOpen(true)}
-                    className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
-                  >
-                    网易云热榜
-                  </button>
-                  <div className="flex min-w-0 flex-shrink-0 items-center gap-1 overflow-x-auto">
-                    <button
-                      type="button"
-                      onClick={() => setSongHistoryOpen(true)}
-                      className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
-                    >
-                      点歌历史
-                    </button>
+              <div className="mb-2 flex items-center justify-between gap-2 overflow-x-auto px-1 sm:mb-4">
+                <button
+                  type="button"
+                  onClick={() => setSongHistoryOpen(true)}
+                  className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                >
+                  点歌历史
+                </button>
+                {searchableCount > 0 && (
+                  <div className="flex flex-shrink-0 items-center gap-1">
                     <button
                       type="button"
                       onClick={openFavorites}
@@ -999,8 +1001,8 @@ export default function Room() {
                       导入歌单
                     </button>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* 桌面：播放队列撑满剩余高度，底部与热榜对齐 */}
@@ -1060,13 +1062,13 @@ export default function Room() {
             </div>
           </div>
 
-          {/* 右侧：桌面仅聊天室；手机保持队列 + 聊天 */}
-          <div className="order-2 flex flex-col gap-3 lg:self-stretch lg:min-h-0">
+          {/* 右侧：聊天室占满 */}
+          <div className="order-2 flex min-h-0 min-w-0 flex-col gap-3 lg:h-full lg:min-h-0">
             <div className="lg:hidden">
               {renderQueueSection()}
             </div>
 
-            <div className="flex-shrink-0 h-[300px] sm:h-[320px] lg:flex-1 lg:min-h-0 lg:h-auto">
+            <div className="h-[300px] sm:h-[320px] lg:h-full lg:min-h-0 lg:flex-1">
               <ChatPanel />
             </div>
           </div>
@@ -1291,16 +1293,6 @@ export default function Room() {
             </div>
           </div>
         </div>
-      )}
-
-
-      {neteaseToplistOpen && (
-        <NeteaseToplistModal
-          open={neteaseToplistOpen}
-          addingId={addingId}
-          onClose={() => setNeteaseToplistOpen(false)}
-          onAdd={handleAdd}
-        />
       )}
 
 

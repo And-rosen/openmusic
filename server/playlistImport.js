@@ -85,7 +85,7 @@ function normalizeMetingPlaylistSong(raw, source) {
   };
 }
 
-async function fetchNeteasePlaylistName(playlistId) {
+async function fetchNeteasePlaylistMeta(playlistId) {
   try {
     const response = await fetchWithTimeout(
       `https://music.163.com/api/playlist/detail?id=${encodeURIComponent(playlistId)}`,
@@ -94,11 +94,40 @@ async function fetchNeteasePlaylistName(playlistId) {
     );
     if (!response.ok) return null;
     const data = await response.json();
-    if (data.code !== 200 || !data.result?.name) return null;
-    return String(data.result.name);
+    if (data.code !== 200 || !data.result) return null;
+    const result = data.result;
+    return {
+      id: String(result.id || playlistId),
+      name: String(result.name || '未命名歌单'),
+      coverImgUrl: String(result.coverImgUrl || result.picUrl || ''),
+      creatorName: String(result.creator?.nickname || ''),
+      trackCount: Number(result.trackCount || 0),
+      playCount: Number(result.playCount || 0),
+    };
   } catch {
     return null;
   }
+}
+
+async function fetchNeteasePlaylistName(playlistId) {
+  const meta = await fetchNeteasePlaylistMeta(playlistId);
+  return meta?.name || null;
+}
+
+export async function fetchNeteasePlaylistMetas(playlistIds) {
+  const unique = [...new Set(playlistIds.map((id) => String(id || '').trim()).filter(Boolean))].slice(0, 12);
+  const results = [];
+
+  for (const id of unique) {
+    let meta = await fetchNeteasePlaylistMeta(id);
+    if (!meta) {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      meta = await fetchNeteasePlaylistMeta(id);
+    }
+    if (meta) results.push(meta);
+  }
+
+  return results;
 }
 
 async function fetchMetingPlaylist(server, playlistId) {

@@ -18,6 +18,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: #444 transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -28,11 +38,18 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #444;
+  background: transparent;
   border-radius: 3px;
+  transition: background 0.2s ease;
 }
 
-::-webkit-scrollbar-thumb:hover {
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: #444;
+}
+
+*:hover::-webkit-scrollbar-thumb:hover,
+*:focus-within::-webkit-scrollbar-thumb:hover {
   background: #666;
 }
 
@@ -85,6 +102,16 @@ body {
 
   .safe-top {
     padding-top: max(0.625rem, env(safe-area-inset-top, 0px));
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    scrollbar-color: transparent transparent;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
   }
 
   .volume-range {

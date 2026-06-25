@@ -10,6 +10,8 @@ interface Props {
   onAdd: (song: SearchResult) => void;
   refreshKey?: number;
   compact?: boolean;
+  embedded?: boolean;
+  limit?: number;
 }
 
 function rankStyle(rank: number) {
@@ -40,7 +42,15 @@ function TruncateWithTip({ text, className }: { text: string; className?: string
   );
 }
 
-export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact = false }: Props) {
+export default function HotSongPanel({
+  addingId,
+  onAdd,
+  refreshKey = 0,
+  compact = false,
+  embedded = false,
+  limit,
+}: Props) {
+  const fetchLimit = limit ?? (compact ? 8 : embedded ? 8 : 15);
   const [songs, setSongs] = useState<HotSongItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -50,7 +60,7 @@ export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact 
     const loadHot = async (silent = false) => {
       if (!silent) setLoading(true);
       try {
-        const data = await getHotSongs(compact ? 8 : 15);
+        const data = await getHotSongs(fetchLimit);
         if (cancelled) return;
         setSongs(data);
       } catch {
@@ -66,7 +76,7 @@ export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact 
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [compact, refreshKey]);
+  }, [compact, embedded, fetchLimit, refreshKey]);
 
   const handleAdd = (song: HotSongItem) => {
     onAdd({
@@ -122,8 +132,8 @@ export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact 
   }
 
   return (
-    <div className="bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden flex flex-col h-full min-h-0">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-netease-border/50 flex-shrink-0">
+    <div className={`flex flex-col min-h-0 ${embedded ? 'h-full flex-1' : 'bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden h-full'}`}>
+      <div className={`flex items-center justify-between px-4 flex-shrink-0 ${embedded ? 'py-2' : 'py-2.5'} ${embedded ? '' : 'border-b border-netease-border/50'}`}>
         <div className="flex items-center gap-1.5">
           <Flame className="w-4 h-4 text-orange-400" />
           <h2 className="text-sm font-medium">点歌热榜</h2>
@@ -151,10 +161,10 @@ export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact 
               const isAdding = addingId === key;
 
               return (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 p-2 rounded-xl hover:bg-netease-card/80 group transition-colors"
-                >
+                  <div
+                    key={key}
+                    className={`flex items-center gap-2 rounded-xl transition-colors hover:bg-netease-card/80 group ${embedded ? 'p-1.5' : 'p-2'}`}
+                  >
                   <span
                     className={`flex-shrink-0 w-5 h-5 rounded text-[11px] font-bold flex items-center justify-center ${rankStyle(rank)}`}
                   >
