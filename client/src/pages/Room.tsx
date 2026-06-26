@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform } from '../api/music/playlist';
@@ -44,6 +44,7 @@ import ChatPanel from '../components/ChatPanel';
 import HotSongPanel from '../components/HotSongPanel';
 import RecommendedPlaylistsPanel from '../components/RecommendedPlaylistsPanel';
 import FavoriteButton from '../components/FavoriteButton';
+import PageSizeSelect from '../components/PageSizeSelect';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
@@ -130,7 +131,9 @@ function formatHistoryTime(time: number) {
 
 const PLAYLIST_SEARCH_PAGE_SIZE = 6;
 const FAVORITES_IMPORT_BATCH_SIZE = 500;
-const FAVORITES_PAGE_SIZE = 15;
+const FAVORITES_PAGE_SIZE_OPTIONS = [15, 30, 50] as const;
+type FavoritesPageSize = (typeof FAVORITES_PAGE_SIZE_OPTIONS)[number];
+const DEFAULT_FAVORITES_PAGE_SIZE: FavoritesPageSize = 15;
 type SearchMode = 'song' | 'playlist';
 
 
@@ -194,6 +197,7 @@ export default function Room() {
   const [favorites, setFavorites] = useState<FavoriteSong[]>([]);
   const [favoriteQuery, setFavoriteQuery] = useState('');
   const [favoritePage, setFavoritePage] = useState(1);
+  const [favoritePageSize, setFavoritePageSize] = useState<FavoritesPageSize>(DEFAULT_FAVORITES_PAGE_SIZE);
   const [removingFavoriteId, setRemovingFavoriteId] = useState<string | null>(null);
   const [addingAllFavorites, setAddingAllFavorites] = useState(false);
   const [importingFavorites, setImportingFavorites] = useState(false);
@@ -280,15 +284,15 @@ export default function Room() {
     return [song.name, song.artist, song.album, song.lrc].some((value) => String(value || '').toLowerCase().includes(keyword));
   });
 
-  const favoriteTotalPages = Math.max(1, Math.ceil(filteredFavorites.length / FAVORITES_PAGE_SIZE));
+  const favoriteTotalPages = Math.max(1, Math.ceil(filteredFavorites.length / favoritePageSize));
   const pagedFavorites = filteredFavorites.slice(
-    (favoritePage - 1) * FAVORITES_PAGE_SIZE,
-    favoritePage * FAVORITES_PAGE_SIZE,
+    (favoritePage - 1) * favoritePageSize,
+    favoritePage * favoritePageSize,
   );
 
   useEffect(() => {
     setFavoritePage(1);
-  }, [favoriteQuery, favorites.length]);
+  }, [favoriteQuery, favorites.length, favoritePageSize]);
 
   useEffect(() => {
     if (favoritePage > favoriteTotalPages) {
@@ -1403,7 +1407,6 @@ export default function Room() {
                   {favorites.length === 0 ? '暂无收藏歌曲' : '没有匹配的收藏歌曲'}
                 </div>
               ) : (
-                <>
                 <div className="space-y-2">
                   {pagedFavorites.map((song) => {
                     const key = songKey(song);
@@ -1442,32 +1445,43 @@ export default function Room() {
                     );
                   })}
                 </div>
-                {filteredFavorites.length > FAVORITES_PAGE_SIZE && (
-                  <div className="mt-3 flex items-center justify-between border-t border-netease-border/40 pt-3 text-xs text-netease-muted">
-                    <span>第 {favoritePage} / {favoriteTotalPages} 页</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={favoritePage <= 1}
-                        onClick={() => setFavoritePage((page) => Math.max(1, page - 1))}
-                        className="rounded-lg px-2.5 py-1 hover:bg-white/10 hover:text-white disabled:opacity-40"
-                      >
-                        上一页
-                      </button>
-                      <button
-                        type="button"
-                        disabled={favoritePage >= favoriteTotalPages}
-                        onClick={() => setFavoritePage((page) => Math.min(favoriteTotalPages, page + 1))}
-                        className="rounded-lg px-2.5 py-1 hover:bg-white/10 hover:text-white disabled:opacity-40"
-                      >
-                        下一页
-                      </button>
-                    </div>
-                  </div>
-                )}
-                </>
               )}
             </div>
+            {!favoritesLoading && filteredFavorites.length > 0 && (
+              <div className="flex-shrink-0 space-y-2 border-t border-netease-border/40 bg-netease-bg/90 px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <PageSizeSelect
+                    value={favoritePageSize}
+                    options={FAVORITES_PAGE_SIZE_OPTIONS}
+                    onChange={setFavoritePageSize}
+                  />
+                  <span className="text-xs text-netease-muted">
+                    第 {favoritePage} / {favoriteTotalPages} 页
+                    <span className="ml-1 text-netease-muted/50">共 {filteredFavorites.length} 首</span>
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    disabled={favoritePage <= 1}
+                    onClick={() => setFavoritePage((page) => Math.max(1, page - 1))}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    上一页
+                  </button>
+                  <button
+                    type="button"
+                    disabled={favoritePage >= favoriteTotalPages}
+                    onClick={() => setFavoritePage((page) => Math.min(favoriteTotalPages, page + 1))}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    下一页
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

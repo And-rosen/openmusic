@@ -955,7 +955,7 @@ export function removeUser(roomId, userId, connectionId = null) {
   }
 
   room.users.delete(userId);
-  removeUserFromAdmins(room, userId);
+  // 管理员身份在主动离房时保留，重进后恢复；仅踢人时清除（见 kickUser）
 
   if (room.users.size === 0) {
     // 刷新/断线时房间会短暂无人：保留 isPlaying，仅冻结进度，便于重新进入后继续播放
