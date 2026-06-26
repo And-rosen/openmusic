@@ -106,6 +106,8 @@ export interface RoomState {
   creatorId?: string | null;
   /** 管理员（最多 3 人），可控制播放 */
   adminIds?: string[];
+  /** 曾进房用户的最近昵称（用于离线管理员展示） */
+  userNicknames?: Record<string, string>;
   ownerConnectionId?: string | null;
   queue: QueueItem[];
   current: QueueItem | null;

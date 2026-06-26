@@ -11,15 +11,18 @@ interface Props {
   onNotice?: (message: string, type: 'success' | 'error') => void;
 }
 
+type DisplayUser = RoomUser & { offline?: boolean };
+
 type PendingAction =
-  | { type: 'kick'; user: RoomUser }
-  | { type: 'admin'; user: RoomUser; admin: boolean };
+  | { type: 'kick'; user: DisplayUser }
+  | { type: 'admin'; user: DisplayUser; admin: boolean };
 
 export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
   const room = useRoomStore((s) => s.room);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const isOwner = useRoomStore((s) => s.isOwner);
   const adminIds = room?.adminIds || [];
+  const userNicknames = room?.userNicknames || {};
   const nickname = useRoomStore((s) => s.nickname);
   const setNickname = useRoomStore((s) => s.setNickname);
   const { renameUser, kickUser, setRoomAdmin } = useSocket();
@@ -33,17 +36,28 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
   const [error, setError] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const orderedUsers = useMemo(() => {
-    return [...users].sort((a, b) => {
+  const orderedUsers = useMemo<DisplayUser[]>(() => {
+    const onlineIds = new Set(users.map((user) => user.id));
+    const offlineAdmins: DisplayUser[] = adminIds
+      .filter((id) => !onlineIds.has(id) && id !== creatorId)
+      .map((id) => ({
+        id,
+        nickname: userNicknames[id] || `用户${id.slice(-4)}`,
+        joinedAt: 0,
+        offline: true,
+      }));
+
+    return [...users.map((user) => ({ ...user, offline: false as const })), ...offlineAdmins].sort((a, b) => {
       if (a.id === mySocketId) return -1;
       if (b.id === mySocketId) return 1;
       if (creatorId) {
         if (a.id === creatorId) return -1;
         if (b.id === creatorId) return 1;
       }
+      if (a.offline !== b.offline) return a.offline ? 1 : -1;
       return a.joinedAt - b.joinedAt;
     });
-  }, [users, mySocketId, creatorId]);
+  }, [users, mySocketId, creatorId, adminIds, userNicknames]);
 
   useEffect(() => {
     if (!open) return;
@@ -80,12 +94,12 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
     setSaving(false);
   };
 
-  const handleKick = (user: RoomUser) => {
-    if (!isOwner || kickingId) return;
+  const handleKick = (user: DisplayUser) => {
+    if (!isOwner || kickingId || user.offline) return;
     setPendingAction({ type: 'kick', user });
   };
 
-  const handleToggleAdmin = (user: RoomUser) => {
+  const handleToggleAdmin = (user: DisplayUser) => {
     if (!isOwner || adminTogglingId) return;
     const nextAdmin = !adminIds.includes(user.id);
     setPendingAction({ type: 'admin', user, admin: nextAdmin });
@@ -126,14 +140,15 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
     setAdminTogglingId(null);
   };
 
-  const canKick = (user: RoomUser) => (
+  const canKick = (user: DisplayUser) => (
     isOwner
+    && !user.offline
     && user.id !== mySocketId
     && user.id !== creatorId
     && !adminIds.includes(user.id)
   );
 
-  const canToggleAdmin = (user: RoomUser) => (
+  const canToggleAdmin = (user: DisplayUser) => (
     isOwner
     && user.id !== mySocketId
     && user.id !== creatorId
@@ -251,15 +266,24 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
                             TV
                           </span>
                         )}
+                        {user.offline && (
+                          <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-white/8 px-1.5 py-0 text-[9px] leading-4 text-netease-muted">
+                            离线
+                          </span>
+                        )}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1 text-[10px] text-netease-muted/70">
-                        <MapPin className="h-3 w-3 flex-shrink-0" />
-                        <span className="truncate">{user.location || '未知'}</span>
+                        {!user.offline && (
+                          <>
+                            <MapPin className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate">{user.location || '未知'}</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex flex-shrink-0 items-center">
-                      {isMe && !editing && (
+                      {isMe && !editing && !user.offline && (
                         <button
                           type="button"
                           onClick={() => {

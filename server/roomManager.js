@@ -131,6 +131,7 @@ function snapshotRoomForStorage(room) {
     nextRandom: serializeSongMeta(room.nextRandom),
     adminIds: Array.from(room.adminIds || []),
     autoPromotedAdminIds: Array.from(room.autoPromotedAdminIds || []),
+    userNicknames: Object.fromEntries(room.userNicknames || []),
     audioQuality: room.audioQuality ?? { netease: 'hires', tencent: 'lossless' },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     createdAt: room.createdAt,
@@ -162,6 +163,7 @@ function restoreRoomFromStorage(data) {
   room.mutedUserIds = new Set(data.mutedUserIds || []);
   room.adminIds = new Set(Array.isArray(data.adminIds) ? data.adminIds : []);
   room.autoPromotedAdminIds = new Set(Array.isArray(data.autoPromotedAdminIds) ? data.autoPromotedAdminIds : []);
+  room.userNicknames = new Map(Object.entries(data.userNicknames || {}));
   room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.neteaseFmMode = normalizeFmMode(data.neteaseFmMode);
   room.createdAt = data.createdAt ?? Date.now();
@@ -303,6 +305,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     autoAdvancePromise: null,
     adminIds: new Set(),
     autoPromotedAdminIds: new Set(),
+    userNicknames: new Map(),
     audioQuality: {
       netease: 'hires',
       tencent: 'lossless',
@@ -346,8 +349,32 @@ function revokeAutoPromotedAdmins(room) {
 function pruneAdminIds(room) {
   const admins = ensureAdminIds(room);
   for (const id of admins) {
-    if (!isEligibleOwner(room.users.get(id))) admins.delete(id);
+    const user = room.users.get(id);
+    if (user && !isEligibleOwner(user)) admins.delete(id);
   }
+}
+
+function rememberUserNickname(room, userId, nickname) {
+  const nick = normalizeNickname(nickname);
+  if (!userId || !nick) return;
+  if (!room.userNicknames) room.userNicknames = new Map();
+  room.userNicknames.set(userId, nick);
+}
+
+function resolveStoredNickname(room, userId) {
+  const online = room.users.get(userId);
+  if (online?.nickname) return online.nickname;
+  const stored = room.userNicknames?.get(userId);
+  if (stored) return stored;
+  for (let i = room.messages.length - 1; i >= 0; i -= 1) {
+    const message = room.messages[i];
+    if (message.userId === userId && message.nickname) return message.nickname;
+  }
+  return '用户';
+}
+
+function getOnlineAdminIds(room) {
+  return getOrderedAdminIds(room).filter((id) => isEligibleOwner(room.users.get(id)));
 }
 
 function getOrderedAdminIds(room) {
@@ -364,7 +391,9 @@ function isAdminUser(room, userId) {
 
 function canControlPlayback(room, userId) {
   if (!room || !userId) return false;
-  if (isRoomCreator(room, userId) && isEligibleOwner(room.users.get(userId))) return true;
+  const user = room.users.get(userId);
+  if (!isEligibleOwner(user)) return false;
+  if (isRoomCreator(room, userId)) return true;
   return isAdminUser(room, userId);
 }
 
@@ -404,7 +433,7 @@ function refreshRoomOwner(room, options = {}) {
     return;
   }
 
-  const admins = getOrderedAdminIds(room);
+  const admins = getOnlineAdminIds(room);
   if (admins.length > 0) {
     room.ownerId = admins[0];
     refreshOwnerConnection(room);
@@ -581,6 +610,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
     location: String(options.location || existing?.location || '').trim().slice(0, 12),
     chatVisibleSince,
   });
+  rememberUserNickname(room, userId, resolvedNickname);
 
   reassignOrphanQueueOwnership(room, userId, resolvedNickname);
 
@@ -703,12 +733,13 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
   if (targetUserId === actorId) return { error: '不能修改自己的管理员状态' };
   if (targetUserId === room.creatorId) return { error: '房主无需设为管理员' };
 
-  const target = room.users.get(targetUserId);
-  if (!target) return { error: '用户不在房间中' };
-  if (!isEligibleOwner(target)) return { error: '不能设置 TV 用户为管理员' };
-
   const admins = ensureAdminIds(room);
+  const target = room.users.get(targetUserId);
+  const targetLabel = resolveStoredNickname(room, targetUserId);
+
   if (admin) {
+    if (!target) return { error: '用户不在房间中' };
+    if (!isEligibleOwner(target)) return { error: '不能设置 TV 用户为管理员' };
     if (admins.has(targetUserId)) {
       return { room: serializeRoom(room) };
     }
@@ -716,6 +747,9 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
     admins.add(targetUserId);
     ensureAutoPromotedAdminIds(room).delete(targetUserId);
   } else {
+    if (!admins.has(targetUserId)) {
+      return { room: serializeRoom(room) };
+    }
     admins.delete(targetUserId);
     ensureAutoPromotedAdminIds(room).delete(targetUserId);
   }
@@ -728,7 +762,7 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
   invalidateRoomsListCache();
   return {
     room: serializeRoom(room),
-    message: admin ? `已将「${target.nickname}」设为管理员` : `已取消「${target.nickname}」的管理员`,
+    message: admin ? `已将「${targetLabel}」设为管理员` : `已取消「${targetLabel}」的管理员`,
   };
 }
 
@@ -810,6 +844,7 @@ export function renameUser(roomId, socketId, nickname) {
   if (!nextNickname) return { error: '昵称不能为空' };
 
   user.nickname = nextNickname;
+  rememberUserNickname(room, socketId, nextNickname);
   updateRequesterNickname(room.current, socketId, nextNickname);
   room.queue.forEach((item) => updateRequesterNickname(item, socketId, nextNickname));
   room.jumpRequests.forEach((request) => {
@@ -1855,6 +1890,7 @@ function serializeRoom(room, options = {}) {
     ownerId: room.ownerId,
     creatorId: room.creatorId ?? null,
     adminIds: getOrderedAdminIds(room),
+    userNicknames: Object.fromEntries(room.userNicknames || []),
     ownerConnectionId: room.ownerConnectionId,
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
     current: serializeQueueItemForRoom(room.current),
