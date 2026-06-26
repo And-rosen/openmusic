@@ -318,7 +318,7 @@ export default function Home() {
               <GiteeIcon className="w-4 h-4" />
             </a>
             <a
-              href="https://github.com/wqqqqqq200/openmusic"
+              href="https://github.com/qq01-hub/openmusic"
               target="_blank"
               rel="noopener noreferrer"
               className={`hidden sm:flex ${repoLinkCls}`}

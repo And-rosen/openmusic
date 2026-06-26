@@ -52,7 +52,7 @@ docker run -d --name meting -p 3000:3000 ghcr.io/mikus-loli/meting-api:latest
 ### 启动 OpenMusic
 
 ```bash
-git clone https://github.com/wqqqqqq200/openmusic.git
+git clone https://github.com/qq01-hub/openmusic.git
 cd openmusic
 
 npm run install:all

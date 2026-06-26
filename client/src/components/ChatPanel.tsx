@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { MessageCircle, MicOff, Reply, Send, Smile, X } from 'lucide-react';
+import { ChevronDown, MessageCircle, MicOff, Reply, Send, Smile, X } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useChatStore } from '../stores/chatStore';
 import { getClientId } from '../lib/clientId';
@@ -85,6 +85,7 @@ export default function ChatPanel() {
   const [qqFaces, setQQFaces] = useState<QFaceItem[]>(() => getInitialQQFaces());
   const [loadingFaces, setLoadingFaces] = useState(() => !hasFullQQFaces());
   const [chatScrollRoot, setChatScrollRoot] = useState<HTMLDivElement | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [emojiGridRoot, setEmojiGridRoot] = useState<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLDivElement>(null);
   const emojiPanelRef = useRef<HTMLDivElement>(null);
@@ -109,6 +110,16 @@ export default function ChatPanel() {
   const mutedSet = useMemo(() => new Set(room?.mutedUserIds || []), [room?.mutedUserIds]);
   const myUserId = mySocketId || getClientId();
   const chatMuted = isChatMutedForUser(room, myUserId);
+
+  const messagesLayoutKey = useMemo(
+    () => messages.map((m) => {
+      const reactions = (m.reactions || [])
+        .map((r) => `${r.emoji}:${r.users.length}`)
+        .join(',');
+      return `${m.id}:${reactions}`;
+    }).join('|'),
+    [messages],
+  );
 
   const orderedMuteUsers = useMemo(() => {
     if (!room) return [];
@@ -150,6 +161,7 @@ export default function ChatPanel() {
     if (roomIdRef.current !== room.id) {
       roomIdRef.current = room.id;
       stickToBottomRef.current = true;
+      setShowScrollToBottom(false);
       setReplyTo(null);
       setShowMentionPicker(false);
       setMentionQuery('');
@@ -179,7 +191,28 @@ export default function ChatPanel() {
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (stickToBottomRef.current) scrollToBottom('instant');
     else if (distanceToBottom < 120) scrollToBottom('smooth');
-  }, [chatScrollRoot, messages.length, room?.id, reactionPickerMessageId]);
+  }, [chatScrollRoot, messagesLayoutKey, room?.id, reactionPickerMessageId]);
+
+  useEffect(() => {
+    const el = chatScrollRoot;
+    if (!el) return;
+    const syncBottom = () => {
+      if (!stickToBottomRef.current || reactionPickerOpenRef.current) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+    };
+    const ro = new ResizeObserver(syncBottom);
+    const observeChildren = () => {
+      ro.disconnect();
+      Array.from(el.children).forEach((child) => ro.observe(child));
+    };
+    observeChildren();
+    const mo = new MutationObserver(observeChildren);
+    mo.observe(el, { childList: true });
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [chatScrollRoot, messagesLayoutKey]);
 
   useEffect(() => {
     const el = chatScrollRoot;
@@ -187,7 +220,9 @@ export default function ChatPanel() {
 
     const handleScroll = () => {
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottomRef.current = distanceToBottom < 80;
+      const atBottom = distanceToBottom < 80;
+      stickToBottomRef.current = atBottom;
+      setShowScrollToBottom(!atBottom);
 
       if (el.scrollTop > 48 || !hasMoreOlder || loadingOlderRef.current) return;
 
@@ -381,6 +416,14 @@ export default function ChatPanel() {
       .filter((user) => messageText.includes(`@${user.nickname}`))
       .slice(0, 10)
       .map((user) => ({ id: user.id, nickname: user.nickname }));
+  };
+
+  const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const el = chatScrollRoot;
+    if (!el) return;
+    stickToBottomRef.current = true;
+    setShowScrollToBottom(false);
+    el.scrollTo({ top: el.scrollHeight, behavior });
   };
 
   const handleSend = async () => {
@@ -654,15 +697,16 @@ export default function ChatPanel() {
         )}
       </div>
 
-      <div ref={setChatScrollRoot} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-        {(loadingOlder || hasMoreOlder) && (
-          <p className="py-1 text-center text-[10px] text-netease-muted">
-            {loadingOlder ? '加载更早的消息…' : '上滑加载更多'}
-          </p>
-        )}
-        {messages.length === 0 ? (
-          <p className="py-8 text-center text-xs text-netease-muted">暂无消息，打个招呼吧</p>
-        ) : messages.map((msg) => {
+      <div className="relative min-h-0 flex-1">
+        <div ref={setChatScrollRoot} className="h-full space-y-2 overflow-y-auto px-3 py-2 pb-3">
+          {(loadingOlder || hasMoreOlder) && (
+            <p className="py-1 text-center text-[10px] text-netease-muted">
+              {loadingOlder ? '加载更早的消息…' : '上滑加载更多'}
+            </p>
+          )}
+          {messages.length === 0 ? (
+            <p className="py-8 text-center text-xs text-netease-muted">暂无消息，打个招呼吧</p>
+          ) : messages.map((msg) => {
           const myUserId = mySocketId || getClientId();
           const isMe = msg.userId === myUserId;
           const isRoomCreator = msg.userId === room.creatorId;
@@ -725,7 +769,19 @@ export default function ChatPanel() {
               </div>
             </div>
           );
-        })}
+          })}
+        </div>
+        {showScrollToBottom && (
+          <button
+            type="button"
+            onClick={() => scrollChatToBottom('smooth')}
+            className="absolute bottom-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-netease-dark/95 text-white shadow-lg backdrop-blur transition-colors hover:bg-white/15"
+            title="回到底部"
+            aria-label="回到底部"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <div ref={chatOverlayHostRef} className="pointer-events-none absolute inset-0 z-30" />
