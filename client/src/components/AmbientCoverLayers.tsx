@@ -1,19 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { measureCoverLuminance, tuneCoverBackdrop, type CoverBackdropTuning } from '../lib/coverBackdrop';
+import { toProxiedMediaUrl } from '../lib/mediaProxyUrl';
 
 interface Props {
   coverUrl: string;
   className?: string;
 }
 
-function getCoverProbeUrl(url: string): string {
-  if (url.startsWith('/') || url.startsWith('data:') || url.startsWith('blob:')) return url;
-  return `/api/media-proxy?url=${encodeURIComponent(url)}`;
-}
-
 export default function AmbientCoverLayers({ coverUrl, className = 'absolute inset-0' }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [tuning, setTuning] = useState<CoverBackdropTuning>(() => tuneCoverBackdrop(null));
+  const displayUrl = useMemo(() => toProxiedMediaUrl(coverUrl), [coverUrl]);
 
   useEffect(() => {
     setLoaded(false);
@@ -27,21 +24,22 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
     probe.onerror = () => {
       setTuning(tuneCoverBackdrop(null));
     };
-    probe.src = getCoverProbeUrl(coverUrl);
+    probe.src = displayUrl;
 
     return () => {
       probe.onload = null;
       probe.onerror = null;
     };
-  }, [coverUrl]);
+  }, [displayUrl]);
 
   return (
     <div className={`${className} overflow-hidden`} aria-hidden>
       <div className="absolute inset-0 bg-[#0d0d0d]" />
 
       <img
-        src={coverUrl}
+        src={displayUrl}
         alt=""
+        crossOrigin="anonymous"
         className="absolute inset-0 h-full w-full object-cover saturate-110 transition-[opacity,filter] duration-700"
         style={{
           opacity: loaded ? tuning.coverOpacity : 0,

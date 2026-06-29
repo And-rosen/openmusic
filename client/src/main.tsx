@@ -6,10 +6,12 @@ import './index.css';
 import { installOpenMusicDebug } from './lib/debugTools';
 import { installVisibilitySync } from './lib/visibilitySync';
 import { applyPageSeo } from './lib/seo';
+import { ensureSessionBootstrap } from './lib/sessionBootstrap';
 
 installOpenMusicDebug();
 installVisibilitySync();
 applyPageSeo();
+void ensureSessionBootstrap();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

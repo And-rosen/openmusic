@@ -1,8 +1,10 @@
 import { useState } from 'react';
 
 import {
-  ChevronDown, Play, Pause, SkipForward, Loader2,
+  ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check,
 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { copyToClipboard } from '../lib/copyToClipboard';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 
@@ -34,6 +36,9 @@ interface Props {
 
 
 export default function PlayerPage({ onClose }: Props) {
+
+  const { roomId } = useParams();
+  const [tvCopied, setTvCopied] = useState(false);
 
   const room = useRoomStore((s) => s.room);
 
@@ -107,7 +112,15 @@ export default function PlayerPage({ onClose }: Props) {
 
   if (!current) return null;
 
-
+  const handleCopyTvLink = async () => {
+    const id = roomId || room?.id;
+    if (!id) return;
+    const ok = await copyToClipboard(`${window.location.origin}/tv/${id}`);
+    if (ok) {
+      setTvCopied(true);
+      setTimeout(() => setTvCopied(false), 2000);
+    }
+  };
 
   const coverUrl = getCoverUrl(current, 'medium');
 
@@ -133,7 +146,16 @@ export default function PlayerPage({ onClose }: Props) {
 
         <div className="flex-1" />
 
-        <div className="w-10 2xl:w-16" />
+        <Tooltip content={tvCopied ? '已复制 TV 链接' : 'TV 歌词'}>
+          <button
+            type="button"
+            onClick={handleCopyTvLink}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-white/75 transition-colors hover:bg-white/10 hover:text-white sm:h-10 sm:w-10"
+            aria-label="TV 歌词"
+          >
+            {tvCopied ? <Check className="h-5 w-5 text-green-400" /> : <Tv className="h-5 w-5" />}
+          </button>
+        </Tooltip>
 
       </header>
 

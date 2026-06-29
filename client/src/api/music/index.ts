@@ -4,10 +4,10 @@ import { providers, getAllSources } from './sources';
 import { interleaveSearchResults } from './merge';
 import { hasValidLrc, fetchFallbackLrc } from './lrcFallback';
 import { fetchWithTimeout } from '../http';
-import { toSecureMediaUrl } from '../../lib/secureMediaUrl';
+import { toProxiedMediaUrl } from '../../lib/mediaProxyUrl';
 import { getRoomPlaybackQuality } from './quality';
 import { resizeCoverUrl, type CoverSize } from '../../lib/coverUrl';
-import { getClientId } from '../../lib/clientId';
+import { ensureSessionBootstrap } from '../../lib/sessionBootstrap';
 
 function getProvider(source: MusicSource) {
   return providers[source];
@@ -74,7 +74,7 @@ export async function getSongUrl(
   const source = song.source || 'netease';
   const quality = qualityOverride ?? getRoomPlaybackQuality(source);
   const url = await getProvider(source).getSongUrl({ ...song, source }, quality);
-  return toSecureMediaUrl(url);
+  return toProxiedMediaUrl(url);
 }
 
 export {
@@ -142,7 +142,7 @@ export function getCoverUrl(
   size: CoverSize = 'full',
 ): string {
   const source = song.source || 'netease';
-  const raw = toSecureMediaUrl(getProvider(source).getCoverUrl({ ...song, source }));
+  const raw = toProxiedMediaUrl(getProvider(source).getCoverUrl({ ...song, source }));
   return resizeCoverUrl(raw, size);
 }
 
@@ -253,13 +253,13 @@ export async function resolveDurationFromLyrics(
 }
 
 export async function createRoom(name?: string, password?: string): Promise<{ id: string; name: string }> {
-  const payload: { name?: string; password?: string; creatorId?: string } = {
-    creatorId: getClientId(),
-  };
+  await ensureSessionBootstrap();
+  const payload: { name?: string; password?: string } = {};
   if (name?.trim()) payload.name = name.trim();
   if (password?.trim()) payload.password = password.trim();
   const res = await fetchWithTimeout('/api/rooms', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });

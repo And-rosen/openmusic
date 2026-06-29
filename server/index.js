@@ -33,6 +33,7 @@ import {
   setChatMute,
   addToQueue,
   removeFromQueue,
+  clearQueue,
   skipSong,
   finishCurrentSong,
   ensurePlayback,
@@ -628,45 +629,27 @@ app.get('/api/music/lrc-fallback', async (req, res) => {
   }
 });
 
-app.get('/api/rooms', (_req, res) => {
-  res.json(listRooms());
-});
+const IDENTITY_UID_COOKIE = 'openmusic_uid';
+const IDENTITY_TOKEN_COOKIE = 'openmusic_token';
+const IDENTITY_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 365 * 5;
 
-app.post('/api/rooms', (req, res) => {
-  if (!limitRoomCreate(`room:${getRequestIp(req)}`)) {
-    return res.status(429).json({ error: '创建房间过于频繁，请稍后再试' });
+function parseCookieHeader(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of String(header).split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq);
+    const value = trimmed.slice(eq + 1);
+    try {
+      out[decodeURIComponent(key)] = decodeURIComponent(value);
+    } catch {
+      out[key] = value;
+    }
   }
-
-  const name = req.body?.name;
-  const password = req.body?.password;
-  const creatorId = req.body?.creatorId;
-  const room = createRoom({ name, password, creatorId });
-  res.json(room);
-});
-
-app.get('/api/rooms/:id', (req, res) => {
-  const room = getRoomPublic(req.params.id);
-  if (!room) return res.status(404).json({ error: '房间不存在' });
-  res.json(room);
-});
-
-const clientDist = path.join(__dirname, '../client/dist');
-app.use(express.static(clientDist));
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
-  res.sendFile(path.join(clientDist, 'index.html'), (err) => {
-    if (err) next();
-  });
-});
-
-const socketToRoom = new Map();
-const socketToUserId = new Map();
-
-function isPrivateHostname(hostname) {
-  const host = String(hostname || '').toLowerCase();
-  if (!host || host === 'localhost') return true;
-  if (host.endsWith('.local')) return true;
-  return isPrivateIp(host);
+  return out;
 }
 
 function sanitizeClientId(value) {
@@ -696,14 +679,84 @@ function createServerClientId() {
   return randomBytes(18).toString('base64url');
 }
 
-function resolveUserIdentity(clientId, clientToken) {
-  const id = sanitizeClientId(clientId);
-  if (id) {
-    return { userId: id, clientToken: signClientId(id) };
+function setIdentityCookieHeaders(res, userId, token) {
+  const secure = IS_PRODUCTION ? '; Secure' : '';
+  const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; SameSite=Lax${secure}`;
+  res.setHeader('Set-Cookie', [
+    `${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`,
+    `${IDENTITY_TOKEN_COOKIE}=${encodeURIComponent(token)}; ${base}`,
+  ]);
+}
+
+function resolveIdentityFromCookies(cookieHeader) {
+  const cookies = parseCookieHeader(cookieHeader);
+  const userId = sanitizeClientId(cookies[IDENTITY_UID_COOKIE]);
+  const token = String(cookies[IDENTITY_TOKEN_COOKIE] || '').trim();
+  if (userId && verifyClientToken(userId, token)) {
+    return { userId, token };
+  }
+  return null;
+}
+
+function resolveIdentityFromRequest(req) {
+  return resolveIdentityFromCookies(req.headers?.cookie || '');
+}
+
+/** 建立 HttpOnly 会话：身份凭证仅通过 Cookie 传递，不经 WebSocket 明文下发 */
+app.post('/api/session/bootstrap', (req, res) => {
+  const existing = resolveIdentityFromRequest(req);
+  if (existing) {
+    setIdentityCookieHeaders(res, existing.userId, signClientId(existing.userId));
+    return res.json({ clientId: existing.userId });
   }
 
-  const userId = createServerClientId();
-  return { userId, clientToken: signClientId(userId) };
+  const hintedId = sanitizeClientId(req.body?.clientId);
+  const userId = hintedId || createServerClientId();
+  const token = signClientId(userId);
+  setIdentityCookieHeaders(res, userId, token);
+  return res.json({ clientId: userId });
+});
+
+app.get('/api/rooms', (_req, res) => {
+  res.json(listRooms());
+});
+
+app.post('/api/rooms', (req, res) => {
+  if (!limitRoomCreate(`room:${getRequestIp(req)}`)) {
+    return res.status(429).json({ error: '创建房间过于频繁，请稍后再试' });
+  }
+
+  const name = req.body?.name;
+  const password = req.body?.password;
+  const identity = resolveIdentityFromRequest(req);
+  const creatorId = identity?.userId || sanitizeClientId(req.body?.creatorId) || createServerClientId();
+  const room = createRoom({ name, password, creatorId });
+  res.json(room);
+});
+
+app.get('/api/rooms/:id', (req, res) => {
+  const room = getRoomPublic(req.params.id);
+  if (!room) return res.status(404).json({ error: '房间不存在' });
+  res.json(room);
+});
+
+const clientDist = path.join(__dirname, '../client/dist');
+app.use(express.static(clientDist));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
+  res.sendFile(path.join(clientDist, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
+
+const socketToRoom = new Map();
+const socketToUserId = new Map();
+
+function isPrivateHostname(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  if (!host || host === 'localhost') return true;
+  if (host.endsWith('.local')) return true;
+  return isPrivateIp(host);
 }
 
 function getSocketUserId(socket) {
@@ -784,7 +837,7 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
 }
 
 io.on('connection', (socket) => {
-  socket.on('join_room', ({ roomId, nickname, password, readOnly, clientId, clientToken }, callback) => {
+  socket.on('join_room', ({ roomId, nickname, password, readOnly }, callback) => {
     const id = roomId?.toUpperCase();
     if (!roomExists(id)) {
       callback?.({ success: false, error: '房间不存在' });
@@ -797,7 +850,17 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const auth = verifyRoomPassword(id, password, { clientId });
+    const cookieIdentity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+    const userId = Boolean(readOnly)
+      ? createServerClientId()
+      : (cookieIdentity?.userId || createServerClientId());
+
+    if (!readOnly && !cookieIdentity) {
+      callback?.({ success: false, error: '会话未就绪，请刷新页面后重试', needsSession: true });
+      return;
+    }
+
+    const auth = verifyRoomPassword(id, password, { clientId: userId });
     if (!auth.ok) {
       callback?.({ success: false, error: auth.error, needsPassword: auth.needsPassword });
       return;
@@ -812,10 +875,6 @@ io.on('connection', (socket) => {
         io.to(prevRoomId).emit('room_update', prevResult);
       }
     }
-
-    const { userId, clientToken: nextClientToken } = Boolean(readOnly)
-      ? { userId: createServerClientId(), clientToken: null }
-      : resolveUserIdentity(clientId, clientToken);
 
     // 同一连接再次加入同一房间，但解析出的用户身份不同（如身份令牌尚未持久化、
     // 快速重连或 StrictMode 重复挂载）：先移除旧的占位用户，避免一个浏览器出现多个用户。
@@ -875,8 +934,6 @@ io.on('connection', (socket) => {
       playbackState,
       socketId: userId,
       connectionId: socket.id,
-      clientId: userId,
-      clientToken: nextClientToken,
       nickname: joinUser?.nickname
         || roomPayload.users?.find((user) => user.id === userId)?.nickname
         || String(nickname || '').trim(),
@@ -1255,6 +1312,26 @@ io.on('connection', (socket) => {
     }
 
     const result = removeFromQueue(roomId, getSocketUserId(socket), queueId);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('clear_queue', (_payload, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'clear_queue', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = clearQueue(roomId, getSocketUserId(socket));
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

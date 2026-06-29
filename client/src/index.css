@@ -81,6 +81,22 @@ body {
     -webkit-backdrop-filter: blur(20px);
   }
 
+  /* 房间顶栏/底栏：透出星河或封面背景 */
+  .room-glass-bar {
+    background: rgba(0, 0, 0, 0.22);
+    border-color: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  /** 房间顶栏/底栏：透出星河或封面背景 */
+  .room-glass-bar {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
   .text-gradient {
     background: linear-gradient(135deg, #ec4141, #ff6b6b);
     -webkit-background-clip: text;

@@ -21,7 +21,8 @@ import {
   seedPlaybackFromRoom,
   resetPlaybackScheduling,
 } from '../lib/playbackSchedule';
-import { getClientId, getClientToken, rememberClientIdentity } from '../lib/clientId';
+import { rememberClientIdentity } from '../lib/clientId';
+import { ensureSessionBootstrap, resetSessionBootstrap } from '../lib/sessionBootstrap';
 import { mergeRoomState } from '../lib/mergeRoomState';
 import { debugLog, setDebugSocketProvider } from '../lib/debugTools';
 import { bindReportTrackDurationSocket } from '../lib/reportTrackDuration';
@@ -87,19 +88,11 @@ function emitWithAck<TResponse>(
 }
 
 function joinPayload(session: JoinSession) {
-  const base = {
+  return {
     roomId: session.roomId,
     nickname: session.nickname,
     password: session.password?.trim() || undefined,
     readOnly: Boolean(session.readOnly),
-  };
-  if (session.readOnly) {
-    return base;
-  }
-  return {
-    ...base,
-    clientId: getClientId(),
-    clientToken: getClientToken(),
   };
 }
 
@@ -115,6 +108,7 @@ type JoinAckResponse = {
   connectionId?: string;
   clientId?: string;
   clientToken?: string;
+  needsSession?: boolean;
   isOwner?: boolean;
   isAdmin?: boolean;
   canControlPlayback?: boolean;
@@ -137,7 +131,7 @@ function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
     activeJoinMode = 'normal';
     lastJoinSession = session;
     lastTvJoinSession = null;
-    rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
+    rememberClientIdentity(res.socketId);
   }
 
   const resolvedNickname = res.nickname?.trim()
@@ -213,15 +207,28 @@ function rejoinActiveRoom() {
   if (!session || !currentRoom || rejoinInFlight) return;
 
   rejoinInFlight = true;
-  getSocket().timeout(SOCKET_ACK_TIMEOUT_MS).emit(
-    'join_room',
-    joinPayload(session),
-    (err: Error | null, res: JoinAckResponse | undefined) => {
+  const doRejoin = () => {
+    getSocket().timeout(SOCKET_ACK_TIMEOUT_MS).emit(
+      'join_room',
+      joinPayload(session),
+      (err: Error | null, res: JoinAckResponse | undefined) => {
+        rejoinInFlight = false;
+        if (err || !res?.success || !res.room) return;
+        applyJoinResponse(session, res);
+      },
+    );
+  };
+
+  if (session.readOnly) {
+    doRejoin();
+    return;
+  }
+
+  ensureSessionBootstrap()
+    .then(() => doRejoin())
+    .catch(() => {
       rejoinInFlight = false;
-      if (err || !res?.success || !res.room) return;
-      applyJoinResponse(session, res);
-    },
-  );
+    });
 }
 
 
@@ -390,7 +397,6 @@ if (!connected.current && !socketConnectRequested) {
       password?: string,
       options: { readOnly?: boolean } = {},
     ): Promise<{ success: boolean; error?: string; needsPassword?: boolean; room?: RoomState }> => {
-      connect();
       const session: JoinSession = {
         roomId,
         nickname,
@@ -399,20 +405,31 @@ if (!connected.current && !socketConnectRequested) {
       };
       const generation = ++joinGeneration;
 
-      return emitWithAck<JoinAckResponse>(
+      const attemptJoin = () => emitWithAck<JoinAckResponse>(
         'join_room',
         joinPayload(session),
         { success: false, error: '连接超时，请检查网络' },
-      )
-        .then((res) => {
-          if (res.success && res.room) {
-            if (generation !== joinGeneration) return res;
-            applyJoinResponse(session, res);
-          }
+      );
 
-          return res;
-        });
+      const runJoin = async () => {
+        if (!options.readOnly) {
+          await ensureSessionBootstrap();
+        }
+        connect();
+        let res = await attemptJoin();
+        if (!res.success && res.needsSession && !options.readOnly) {
+          resetSessionBootstrap();
+          await ensureSessionBootstrap(true);
+          res = await attemptJoin();
+        }
+        if (res.success && res.room) {
+          if (generation !== joinGeneration) return res;
+          applyJoinResponse(session, res);
+        }
+        return res;
+      };
 
+      return runJoin();
     },
 
     [connect, setConnectionInfo],
@@ -489,6 +506,10 @@ if (s.connected) {
   const removeSong = useCallback((queueId: string): Promise<boolean> => {
     return emitWithAck('remove_song', { queueId }, { success: false }).then((res) => res.success);
 
+  }, []);
+
+  const clearQueue = useCallback((): Promise<{ success: boolean; error?: string }> => {
+    return emitWithAck('clear_queue', {}, { success: false, error: '连接超时，请重试' });
   }, []);
 
 
@@ -832,6 +853,8 @@ if (s.connected) {
     seek,
 
     removeSong,
+
+    clearQueue,
 
     requestJump,
     toggleQueueLike,

@@ -1296,6 +1296,23 @@ export function removeFromQueue(roomId, socketId, queueId) {
   return { room: serializeRoom(room) };
 }
 
+export function clearQueue(roomId, userId) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+
+  if (!canControlPlayback(room, userId)) {
+    return { error: '仅房主或管理员可清空队列' };
+  }
+
+  room.queue = [];
+  room.jumpRequests = room.current
+    ? room.jumpRequests.filter((r) => r.queueId === room.current.queueId)
+    : [];
+  clearNextRandom(room);
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
 // function trimRandomHistory(room) {
 //   if (room.randomPlayedKeys.size <= MAX_RANDOM_HISTORY) return;
 //   const excess = room.randomPlayedKeys.size - MAX_RANDOM_HISTORY;

@@ -18,15 +18,14 @@ import FavoriteButton from './FavoriteButton';
 import Tooltip from './Tooltip';
 
 interface Props {
-
   onExpand: () => void;
   transparentBar?: boolean;
-
+  barClassName?: string;
 }
 
 
 
-export default function MiniPlayer({ onExpand, transparentBar = true }: Props) {
+export default function MiniPlayer({ onExpand, transparentBar = true, barClassName }: Props) {
 
   const room = useRoomStore((s) => s.room);
 
@@ -92,9 +91,11 @@ export default function MiniPlayer({ onExpand, transparentBar = true }: Props) {
 
   if (!current && !fmLoading) return null;
 
-  const playerBarClass = transparentBar
-    ? 'fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/25 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)]'
-    : 'fixed bottom-0 left-0 right-0 z-40 glass border-t border-netease-border/50 pb-[env(safe-area-inset-bottom,0px)]';
+  const playerBarClass = barClassName
+    ? `fixed bottom-0 left-0 right-0 z-40 border-t pb-[env(safe-area-inset-bottom,0px)] ${barClassName}`
+    : transparentBar
+      ? 'fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/25 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)]'
+      : 'fixed bottom-0 left-0 right-0 z-40 glass border-t border-netease-border/50 pb-[env(safe-area-inset-bottom,0px)]';
 
   if (fmLoading) {
     return (

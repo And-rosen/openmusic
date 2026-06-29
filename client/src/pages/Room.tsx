@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban, Image, Sparkles } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban, Sparkles, Settings2 } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -72,7 +72,18 @@ import Tooltip from '../components/Tooltip';
 import { copyToClipboard } from '../lib/copyToClipboard';
 import { rememberRoomVisit } from '../lib/recentRooms';
 import { buildRoomShareText } from '../lib/roomShare';
-import { readRoomCoverBgEnabled, writeRoomCoverBgEnabled } from '../lib/roomCoverBg';
+import RoomVisualPresetSelect from '../components/RoomVisualPresetSelect';
+import RoomVisualFxPanel from '../components/RoomVisualFxPanel';
+import {
+  roomAmbientGlassClass,
+  ROOM_VISUAL_MODE_META,
+  readRoomVisualFx,
+  readRoomVisualMode,
+  writeRoomVisualFx,
+  writeRoomVisualMode,
+  type RoomVisualFxSettings,
+  type RoomVisualMode,
+} from '../lib/roomVisualPreset';
 
 
 function roomPasswordKey(roomId: string) {
@@ -207,7 +218,6 @@ export default function Room() {
   const [listPageSongs, setListPageSongs] = useState<SearchResult[]>([]);
 
   const [copied, setCopied] = useState(false);
-  const [tvCopied, setTvCopied] = useState(false);
   const [searchedKeyword, setSearchedKeyword] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('song');
   const [activeSearchMode, setActiveSearchMode] = useState<SearchMode>('song');
@@ -225,7 +235,9 @@ export default function Room() {
   const [playlistSearchBackup, setPlaylistSearchBackup] = useState<PlaylistSearchBackup | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [hotRefreshKey, setHotRefreshKey] = useState(0);
-  const [coverBgEnabled, setCoverBgEnabled] = useState(readRoomCoverBgEnabled);
+  const [visualMode, setVisualMode] = useState<RoomVisualMode>(readRoomVisualMode);
+  const [visualFx, setVisualFx] = useState<RoomVisualFxSettings>(readRoomVisualFx);
+  const [visualFxOpen, setVisualFxOpen] = useState(false);
   const isLgUp = useMediaQuery('(min-width: 1024px)');
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [songHistoryOpen, setSongHistoryOpen] = useState(false);
@@ -373,11 +385,11 @@ export default function Room() {
     }
   }, [setFavorite, showToast, applyFavorites]);
 
-  const handleAddAllFavorites = useCallback(async () => {
-    if (addingAllFavorites || filteredFavorites.length === 0) return;
+  const handleAddPageFavorites = useCallback(async () => {
+    if (addingAllFavorites || pagedFavorites.length === 0) return;
     setAddingAllFavorites(true);
     try {
-      const result = await addSongsToQueue(filteredFavorites, {
+      const result = await addSongsToQueue(pagedFavorites, {
         getRoom: () => useRoomStore.getState().room,
         addSong,
       });
@@ -387,7 +399,7 @@ export default function Room() {
     } finally {
       setAddingAllFavorites(false);
     }
-  }, [addingAllFavorites, filteredFavorites, addSong, showToast]);
+  }, [addingAllFavorites, pagedFavorites, addSong, showToast]);
 
   const handleImportFavoritesJson = useCallback(() => {
     const input = document.createElement('input');
@@ -967,25 +979,17 @@ export default function Room() {
     }
   };
 
-  const toggleCoverBg = () => {
-    setCoverBgEnabled((prev) => {
-      const next = !prev;
-      writeRoomCoverBgEnabled(next);
-      return next;
-    });
+  const ambientGlassClass = roomAmbientGlassClass(visualMode);
+
+  const handleVisualModeChange = (mode: RoomVisualMode) => {
+    setVisualMode(mode);
+    writeRoomVisualMode(mode);
   };
 
-  const handleCopyTvLink = async () => {
-    const url = `${window.location.origin}/tv/${room?.id}`;
-    const ok = await copyToClipboard(url);
-    if (ok) {
-      setTvCopied(true);
-      setTimeout(() => setTvCopied(false), 2000);
-    } else {
-      showToast('复制失败，请手动复制地址栏链接', 'error');
-    }
+  const handleVisualFxChange = (next: RoomVisualFxSettings) => {
+    setVisualFx(next);
+    writeRoomVisualFx(next);
   };
-
 
 
   if (joinError) {
@@ -1271,7 +1275,19 @@ export default function Room() {
 
     <div className="relative isolate flex h-full flex-col overflow-hidden">
 
-      {coverBgEnabled && <RoomAmbientBackground song={room.current} />}
+      <RoomAmbientBackground
+        song={room.current}
+        visualMode={visualMode}
+        visualFx={visualFx}
+        isPlaying={Boolean(room.isPlaying)}
+      />
+
+      <RoomVisualFxPanel
+        open={visualFxOpen}
+        value={visualFx}
+        onChange={handleVisualFxChange}
+        onClose={() => setVisualFxOpen(false)}
+      />
 
       <AudioEngine />
 
@@ -1320,11 +1336,7 @@ export default function Room() {
         onClose={handleCloseAnnouncementPopup}
       />
 
-      <header className={`relative z-30 flex-shrink-0 border-b px-3 py-2.5 sm:px-4 sm:py-3 safe-top ${
-        coverBgEnabled
-          ? 'border-white/10 bg-black/20 backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)]'
-          : 'glass border-netease-border/50'
-      }`}>
+      <header className={`relative z-30 flex-shrink-0 border-b px-3 py-2.5 sm:px-4 sm:py-3 safe-top ${ambientGlassClass}`}>
 
         <div className="max-w-[1680px] mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
 
@@ -1495,32 +1507,20 @@ export default function Room() {
 
             <div className="flex items-center gap-1 sm:gap-2">
 
-              <Tooltip side="bottom" content={coverBgEnabled ? '关闭封面背景' : '开启封面背景'}>
-                <button
-                  type="button"
-                  onClick={toggleCoverBg}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors sm:px-3 ${
-                    coverBgEnabled
-                      ? 'bg-amber-400/15 text-amber-300 hover:bg-amber-400/25'
-                      : 'text-netease-muted hover:bg-netease-card hover:text-white'
-                  }`}
-                  aria-label="封面背景"
-                  aria-pressed={coverBgEnabled}
-                >
-                  <Image className="h-4 w-4" />
-                  <span className="hidden sm:inline">封面背景</span>
-                </button>
-              </Tooltip>
+              {ROOM_VISUAL_MODE_META[visualMode].hasSettings ? (
+                <Tooltip side="bottom" content="视觉参数">
+                  <button
+                    type="button"
+                    onClick={() => setVisualFxOpen(true)}
+                    className="flex items-center justify-center rounded-lg p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                    aria-label="视觉参数"
+                  >
+                    <Settings2 className="h-4 w-4" />
+                  </button>
+                </Tooltip>
+              ) : null}
 
-              <Tooltip side="bottom" content="TV歌词">
-                <button
-                  onClick={handleCopyTvLink}
-                  className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
-                >
-                  {tvCopied ? <Check className="w-4 h-4 text-green-400" /> : <Tv className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{tvCopied ? '已复制' : 'TV歌词'}</span>
-                </button>
-              </Tooltip>
+              <RoomVisualPresetSelect value={visualMode} onChange={handleVisualModeChange} />
 
               <Tooltip side="bottom" content="分享房间">
                 <button
@@ -1871,11 +1871,11 @@ export default function Room() {
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
-                <Tooltip content="一键点歌">
+                <Tooltip content="当前页点歌">
                   <button
                     type="button"
-                    onClick={() => void handleAddAllFavorites()}
-                    disabled={filteredFavorites.length === 0 || addingAllFavorites || importingFavorites}
+                    onClick={() => void handleAddPageFavorites()}
+                    disabled={pagedFavorites.length === 0 || addingAllFavorites || importingFavorites}
                     className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
                   >
                     {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
@@ -2011,7 +2011,7 @@ export default function Room() {
 
 
       {(room.current || room.randomLoading) && (
-        <MiniPlayer onExpand={() => setShowPlayer(true)} transparentBar={coverBgEnabled} />
+        <MiniPlayer onExpand={() => setShowPlayer(true)} barClassName={ambientGlassClass} />
       )}
 
 
