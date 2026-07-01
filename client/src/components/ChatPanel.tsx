@@ -13,6 +13,7 @@ import Tooltip from './Tooltip';
 import MemberTierBadge from './MemberTierBadge';
 import RoleBadge from './RoleBadge';
 import { fireWelcomeConfetti } from '../lib/confettiBurst';
+import { usePureModeStore } from '../stores/pureModeStore';
 import { ChatMessageReactions, ChatReactionPicker } from './ChatMessageReactions';
 import ChatImageLightbox from './ChatImageLightbox';
 import {
@@ -106,7 +107,7 @@ type MentionOption =
 
 const MENTION_TOKEN_RE = /(@[^\s@]{1,24})(?=\s|$)/g;
 
-export default function ChatPanel() {
+export default function ChatPanel({ className = '' }: { className?: string }) {
   const room = useRoomStore((s) => s.room);
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
@@ -141,6 +142,7 @@ export default function ChatPanel() {
   const chatOverlayHostRef = useRef<HTMLDivElement>(null);
   const emojiPickerPortalRef = useRef<HTMLDivElement>(null);
   const isMobileLayout = useMediaQuery('(max-width: 1023px)');
+  const pureMode = usePureModeStore((s) => s.enabled);
   const bindEmojiGridRef = (el: HTMLDivElement | null) => {
     setEmojiGridRoot(el);
   };
@@ -248,6 +250,7 @@ export default function ChatPanel() {
   }, []);
 
   useEffect(() => {
+    if (pureMode) return;
     const container = chatConfettiRootRef.current;
     if (!container) return;
 
@@ -266,7 +269,7 @@ export default function ChatPanel() {
       welcomeConfettiCooldownRef.current.set(targetId, now);
       fireWelcomeConfetti(container);
     }
-  }, [messages]);
+  }, [messages, pureMode]);
 
   useEffect(() => {
     const el = chatScrollRoot;
@@ -878,7 +881,7 @@ export default function ChatPanel() {
   ) : null;
 
   return (
-    <div ref={chatPanelRef} className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30">
+    <div ref={chatPanelRef} className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 ${className}`}>
       <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-netease-border/50 px-4 py-2">
         <div className="flex items-center gap-2 min-w-0">
           <MessageCircle className="h-4 w-4 text-netease-muted" />
@@ -912,6 +915,7 @@ export default function ChatPanel() {
             <p className="py-8 text-center text-xs text-netease-muted">暂无消息，打个招呼吧</p>
           ) : messages.map((msg) => {
           if (msg.kind === 'welcome') {
+            if (pureMode) return null;
             return (
               <div key={msg.id} className="flex justify-center py-1">
                 <div className="welcome-chat-card max-w-[92%] rounded-2xl px-4 py-3 text-center">
@@ -935,7 +939,7 @@ export default function ChatPanel() {
           const isRoomCreator = msg.userId === room.creatorId;
           const userMemberTier = room.memberTiers?.[msg.userId];
           const user = userMap.get(msg.userId);
-          const isImageOnly = Boolean(msg.imageUrl && !msg.text);
+          const isImageOnly = Boolean(msg.imageUrl && !msg.text && !pureMode);
           return (
             <div key={msg.id} className={`group flex w-full min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`} onContextMenu={(event) => { event.preventDefault(); handleReply(msg); }}>
               <div className={`mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
@@ -965,21 +969,32 @@ export default function ChatPanel() {
                       </div>
                     )}
                     {msg.imageUrl && (
-                      <Tooltip content="点击查看大图">
+                      pureMode ? (
                         <button
                           type="button"
                           onClick={() => setPreviewImageUrl(msg.imageUrl!)}
-                          className={`block cursor-zoom-in overflow-hidden rounded-lg ${msg.text ? 'mb-1' : ''}`}
-                          aria-label="查看聊天图片"
+                          className={`text-sky-300/90 transition-colors hover:text-sky-200 ${msg.text ? 'mb-1' : ''}`}
+                          aria-label="加载查看图片"
                         >
-                          <img
-                            src={msg.imageUrl}
-                            alt="聊天图片"
-                            loading="lazy"
-                            className="max-h-40 max-w-[220px] object-contain"
-                          />
+                          图片
                         </button>
-                      </Tooltip>
+                      ) : (
+                        <Tooltip content="点击查看大图">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewImageUrl(msg.imageUrl!)}
+                            className={`block cursor-zoom-in overflow-hidden rounded-lg ${msg.text ? 'mb-1' : ''}`}
+                            aria-label="查看聊天图片"
+                          >
+                            <img
+                              src={msg.imageUrl}
+                              alt="聊天图片"
+                              loading="lazy"
+                              className="max-h-40 max-w-[220px] object-contain"
+                            />
+                          </button>
+                        </Tooltip>
+                      )
                     )}
                     {msg.text ? renderMessageText(msg.text) : null}
                   </div>

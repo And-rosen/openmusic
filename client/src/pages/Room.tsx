@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban, Sparkles, Settings2 } from 'lucide-react';
+import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, ChevronRight, Cog, Settings2, Shield } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -16,11 +16,16 @@ import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, R
 import type { MusicProviderMeta } from '../api/music/types';
 
 import { useRoomStore } from '../stores/roomStore';
+import { usePureModeStore } from '../stores/pureModeStore';
 
 import { useSocket } from '../hooks/useSocket';
 import { useFavorites } from '../hooks/useFavorites';
 import { createRandomNickname } from '../lib/randomNickname';
 import { usePageSeo } from '../lib/seo';
+import {
+  applyPureModeDisguise,
+  clearPureModeDisguise,
+} from '../lib/roomPureMode';
 
 import { songKey } from '../api/music';
 import SongCover from '../components/SongCover';
@@ -51,24 +56,24 @@ import {
 } from '../lib/songResultPagination';
 import PlaylistImportModal from '../components/PlaylistImportModal';
 import ChatPanel from '../components/ChatPanel';
+import PureModeChatDock from '../components/PureModeChatDock';
 import HotSongPanel from '../components/HotSongPanel';
-import RecommendedPlaylistsPanel from '../components/RecommendedPlaylistsPanel';
+import RecommendedPlaylistsDrawer from '../components/RecommendedPlaylistsDrawer';
 import FavoriteButton from '../components/FavoriteButton';
 import PageSizeSelect from '../components/PageSizeSelect';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
 import RoomFmModeBadge from '../components/RoomFmModeBadge';
-import RoomFmModeModal from '../components/RoomFmModeModal';
-import RoomAnnouncementModal from '../components/RoomAnnouncementModal';
 import RoomAnnouncementPopup from '../components/RoomAnnouncementPopup';
 import RoomMemberModal from '../components/RoomMemberModal';
+import RoomSettingsModal, { type SongRequestSettings } from '../components/RoomSettingsModal';
 import RoomQualityModal from '../components/RoomQualityModal';
 import RoomQualityBadge from '../components/RoomQualityBadge';
 import { resolveEffectiveAudioQuality, useUserQualityStore } from '../stores/userQualityStore';
 import { invalidateUnloadedSongUrlCache, prefetchUpcomingFromRoom } from '../lib/songPreloadCache';
 import { DEFAULT_MEMBER_SETTINGS } from '../lib/memberTierPresets';
-import { canRequestSong } from '../lib/roomPermissions';
+import { getSongRequestBlockReason } from '../lib/roomPermissions';
 import { markAnnouncementSeen, shouldAutoShowAnnouncement } from '../lib/announcementSeen';
 import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
@@ -199,8 +204,14 @@ export default function Room() {
 
   const { room, nickname, showPlayer, setShowPlayer, isOwner, isAdmin, canControlPlayback, mySocketId, exitReason } = useRoomStore();
 
+  const pureMode = usePureModeStore((s) => s.enabled);
+  const setPureModeEnabled = usePureModeStore((s) => s.setEnabled);
+  const [purePlayerHidden, setPurePlayerHidden] = useState(false);
+
+  const roomPageTitle = room?.name ? `${room.name} 房间` : '正在加入房间';
+
   usePageSeo({
-    title: room?.name ? `${room.name} 房间` : '正在加入房间',
+    title: roomPageTitle,
     description: room?.current
       ? `正在播放「${room.current.name}」— 加入 ${room.name} 多人同步听歌、点歌、聊天`
       : '多人实时同步听歌、搜索点歌、歌词滚动、房间聊天',
@@ -237,6 +248,7 @@ export default function Room() {
   const prevOverlayOpenRef = useRef(false);
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
+  const [recommendDrawerOpen, setRecommendDrawerOpen] = useState(false);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
   const [playlistSearchResults, setPlaylistSearchResults] = useState<PlaylistSearchItem[]>([]);
   const [playlistSearchPage, setPlaylistSearchPage] = useState(1);
@@ -272,9 +284,8 @@ export default function Room() {
   const [lockOpen, setLockOpen] = useState(false);
   const [lockPassword, setLockPassword] = useState('');
   const [lockSaving, setLockSaving] = useState(false);
-  const [fmOpen, setFmOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [fmSaving, setFmSaving] = useState(false);
-  const [announcementOpen, setAnnouncementOpen] = useState(false);
   const [announcementSaving, setAnnouncementSaving] = useState(false);
   const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
@@ -296,7 +307,13 @@ export default function Room() {
   const closeToast = useCallback(() => setToast(null), []);
 
   const isCreator = Boolean(room?.creatorId && mySocketId && room.creatorId === mySocketId);
-  const songRequestAllowed = canRequestSong(room, isOwner, isAdmin);
+  const songRequestBlockReason = getSongRequestBlockReason(room, isOwner, isAdmin, mySocketId);
+  const canOpenRoomSettings = isOwner || canControlPlayback;
+  const songRequestSettings: SongRequestSettings = {
+    enabled: room?.songRequestEnabled !== false,
+    minStayMinutes: Math.floor((room?.songRequestMinStaySec ?? 0) / 60),
+    maxPerUser: room?.songRequestMaxPerUser ?? 0,
+  };
 
   const openRenameModal = useCallback(() => {
     if (!room) return;
@@ -840,8 +857,8 @@ export default function Room() {
   }, [playlistSearchBackup, clearSearchResults, isLgUp]);
 
   const handleAdd = async (song: SearchResult) => {
-    if (!songRequestAllowed) {
-      showToast('房主已禁止点歌', 'error');
+    if (songRequestBlockReason) {
+      showToast(songRequestBlockReason, 'error');
       return;
     }
     const key = songKey(song);
@@ -872,8 +889,14 @@ export default function Room() {
 
   const handleAddMany = useCallback(async (songs: SearchResult[]) => {
     if (addingPage || songs.length === 0) return;
-    if (!canRequestSong(useRoomStore.getState().room, isOwner, isAdmin)) {
-      showToast('房主已禁止点歌', 'error');
+    const blockReason = getSongRequestBlockReason(
+      useRoomStore.getState().room,
+      isOwner,
+      isAdmin,
+      useRoomStore.getState().mySocketId,
+    );
+    if (blockReason) {
+      showToast(blockReason, 'error');
       return;
     }
     setAddingPage(true);
@@ -896,7 +919,6 @@ export default function Room() {
     const res = await setRoomFmMode(mode);
     setFmSaving(false);
     if (res.success) {
-      setFmOpen(false);
       showToast('漫游模式已更新', 'success');
     } else {
       showToast(res.error || '漫游模式设置失败', 'error');
@@ -909,12 +931,32 @@ export default function Room() {
     const res = await setRoomAnnouncement(options);
     setAnnouncementSaving(false);
     if (res.success) {
-      setAnnouncementOpen(false);
       showToast('公告已更新', 'success');
     } else {
       showToast(res.error || '公告设置失败', 'error');
     }
   }, [announcementSaving, setRoomAnnouncement, showToast]);
+
+  const handleSaveSongRequestSettings = useCallback(async (settings: SongRequestSettings) => {
+    if (songRequestSaving) return;
+    setSongRequestSaving(true);
+    const res = await setSongRequestEnabled({
+      enabled: settings.enabled,
+      minStaySec: settings.minStayMinutes * 60,
+      maxPerUser: settings.maxPerUser,
+    });
+    setSongRequestSaving(false);
+    if (res.success) {
+      showToast('点歌规则已更新', 'success');
+    } else {
+      showToast(res.error || '点歌设置失败', 'error');
+    }
+  }, [songRequestSaving, setSongRequestEnabled, showToast]);
+
+  const handleOpenMemberModalFromSettings = useCallback(() => {
+    setSettingsOpen(false);
+    setMemberOpen(true);
+  }, []);
 
   const handleSaveMemberSettings = useCallback(async (settings: RoomMemberSettings) => {
     if (memberSaving) return;
@@ -961,19 +1003,6 @@ export default function Room() {
     }
   }, [memberSaving, removeRoomMemberTier, showToast]);
 
-  const handleToggleSongRequest = useCallback(async () => {
-    if (songRequestSaving || !room) return;
-    const next = room.songRequestEnabled === false;
-    setSongRequestSaving(true);
-    const res = await setSongRequestEnabled(next);
-    setSongRequestSaving(false);
-    if (res.success) {
-      showToast(next ? '已允许成员点歌' : '已禁止成员点歌', 'success');
-    } else {
-      showToast(res.error || '点歌设置失败', 'error');
-    }
-  }, [songRequestSaving, room, setSongRequestEnabled, showToast]);
-
   const handleCloseAnnouncementPopup = useCallback(() => {
     if (room?.id && room.announcementEnabled && room.announcementText?.trim()) {
       markAnnouncementSeen(room.id, room.announcementEnabled, room.announcementText);
@@ -1005,8 +1034,52 @@ export default function Room() {
     }
   };
 
-  const displayVisualMode: RoomVisualMode = isLgUp ? visualMode : 'galaxy';
+  const displayVisualMode: RoomVisualMode = pureMode ? 'off' : visualMode;
   const ambientGlassClass = roomAmbientGlassClass(displayVisualMode);
+
+  const handlePureModeToggle = useCallback(() => {
+    const next = !pureMode;
+    setPureModeEnabled(next);
+    if (next) {
+      setVisualFxOpen(false);
+      setPurePlayerHidden(false);
+      if (searchMode !== 'song') {
+        setSearchMode('song');
+        setActiveSearchMode('song');
+        setOverlaySearchMode('song');
+      }
+      applyPureModeDisguise();
+      showToast('已开启纯净模式', 'success');
+    } else {
+      clearPureModeDisguise(roomPageTitle);
+      showToast('已退出纯净模式', 'success');
+    }
+  }, [pureMode, setPureModeEnabled, searchMode, roomPageTitle, showToast]);
+
+  useEffect(() => {
+    if (pureMode) {
+      applyPureModeDisguise();
+    }
+    return () => {
+      if (pureMode) clearPureModeDisguise(roomPageTitle);
+    };
+  }, [pureMode, roomPageTitle]);
+
+  useEffect(() => {
+    if (!pureMode) {
+      setPurePlayerHidden(false);
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      e.preventDefault();
+      setPurePlayerHidden((hidden) => !hidden);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pureMode]);
 
   const handleVisualModeChange = (mode: RoomVisualMode) => {
     if (!isLgUp) return;
@@ -1155,25 +1228,27 @@ export default function Room() {
 
   const searchBar = (
     <div className="flex gap-2 mb-2">
-      <Tooltip side="bottom" content="搜索类型">
-        <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1 sm:rounded-2xl">
-        {([
-          ['song', '歌曲'],
-          ['playlist', '歌单'],
-        ] as const).map(([mode, label]) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => handleSearchModeChange(mode)}
-            className={`rounded-lg px-2.5 py-2 text-xs transition-colors sm:px-3 sm:py-2.5 sm:text-sm ${
-              searchMode === mode ? 'bg-netease-red text-white shadow-sm' : 'text-netease-muted hover:text-white'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-        </div>
-      </Tooltip>
+      {!pureMode && (
+        <Tooltip side="bottom" content="搜索类型">
+          <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1 sm:rounded-2xl">
+          {([
+            ['song', '歌曲'],
+            ['playlist', '歌单'],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => handleSearchModeChange(mode)}
+              className={`rounded-lg px-2.5 py-2 text-xs transition-colors sm:px-3 sm:py-2.5 sm:text-sm ${
+                searchMode === mode ? 'bg-netease-red text-white shadow-sm' : 'text-netease-muted hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          </div>
+        </Tooltip>
+      )}
       <div className="relative flex-1 min-w-0">
         <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 sm:w-5 h-4 sm:h-5 text-netease-muted pointer-events-none" />
         <input
@@ -1272,23 +1347,25 @@ export default function Room() {
 
   const overlaySearchBar = (
     <div className="flex gap-2 flex-shrink-0">
-      <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1">
-        {([
-          ['song', '歌曲'],
-          ['playlist', '歌单'],
-        ] as const).map(([mode, label]) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => handleOverlaySearchModeChange(mode)}
-            className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
-              overlaySearchMode === mode ? 'bg-netease-red text-white shadow-sm' : 'text-netease-muted hover:text-white'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {!pureMode && (
+        <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1">
+          {([
+            ['song', '歌曲'],
+            ['playlist', '歌单'],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => handleOverlaySearchModeChange(mode)}
+              className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+                overlaySearchMode === mode ? 'bg-netease-red text-white shadow-sm' : 'text-netease-muted hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="relative flex-1 min-w-0">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-netease-muted pointer-events-none" />
         <input
@@ -1343,21 +1420,23 @@ export default function Room() {
         />
       )}
 
-      <RoomFmModeModal
-        open={fmOpen}
-        value={normalizeFmMode(room?.neteaseFmMode)}
-        saving={fmSaving}
-        onClose={() => setFmOpen(false)}
-        onSave={handleSaveFmMode}
-      />
-
-      <RoomAnnouncementModal
-        open={announcementOpen}
-        enabled={Boolean(room?.announcementEnabled)}
-        text={room?.announcementText || ''}
-        saving={announcementSaving}
-        onClose={() => setAnnouncementOpen(false)}
-        onSave={handleSaveAnnouncement}
+      <RoomSettingsModal
+        open={settingsOpen}
+        isOwner={isOwner}
+        canModerate={canControlPlayback}
+        fmMode={normalizeFmMode(room?.neteaseFmMode)}
+        fmSaving={fmSaving}
+        announcementEnabled={Boolean(room?.announcementEnabled)}
+        announcementText={room?.announcementText || ''}
+        announcementSaving={announcementSaving}
+        songRequest={songRequestSettings}
+        songRequestSaving={songRequestSaving}
+        memberTierCount={Object.keys(room?.memberTiers ?? {}).length}
+        onClose={() => setSettingsOpen(false)}
+        onSaveFmMode={handleSaveFmMode}
+        onOpenMemberModal={handleOpenMemberModalFromSettings}
+        onSaveAnnouncement={handleSaveAnnouncement}
+        onSaveSongRequest={handleSaveSongRequestSettings}
       />
 
       <RoomMemberModal
@@ -1445,80 +1524,45 @@ export default function Room() {
 
                 {isAdmin && !isOwner && <RoleBadge role="admin" />}
 
-                {isOwner && (
-                  <Tooltip side="bottom" content="私人漫游模式">
+                {canOpenRoomSettings && (
+                  <Tooltip side="bottom" content="房间设置">
                     <button
                       type="button"
-                      onClick={() => setFmOpen(true)}
+                      onClick={() => setSettingsOpen(true)}
                       className="flex-shrink-0 rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
-                      aria-label="私人漫游模式"
+                      aria-label="房间设置"
                     >
-                      <Radio className="w-3.5 h-3.5" />
+                      <Cog className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
-                )}
-
-                {isOwner && (
-                  <Tooltip side="bottom" content="贵宾管理">
-                    <button
-                      type="button"
-                      onClick={() => setMemberOpen(true)}
-                      className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 ${
-                        Object.keys(room.memberTiers ?? {}).length > 0 ? 'text-amber-400' : 'text-netease-muted hover:text-white'
-                      }`}
-                      aria-label="贵宾管理"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                    </button>
-                  </Tooltip>
-                )}
-
-                {canControlPlayback && (
-                  <>
-                    <Tooltip side="bottom" content="房间公告">
-                      <button
-                        type="button"
-                        onClick={() => setAnnouncementOpen(true)}
-                        className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 ${
-                          room.announcementEnabled ? 'text-amber-400' : 'text-netease-muted hover:text-white'
-                        }`}
-                        aria-label="房间公告"
-                      >
-                        <Megaphone className="w-3.5 h-3.5" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip side="bottom" content={room.songRequestEnabled === false ? '已禁止点歌（点击允许）' : '允许点歌（点击禁止）'}>
-                      <button
-                        type="button"
-                        onClick={() => void handleToggleSongRequest()}
-                        disabled={songRequestSaving}
-                        className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 disabled:opacity-50 ${
-                          room.songRequestEnabled === false ? 'text-amber-400' : 'text-netease-muted hover:text-white'
-                        }`}
-                        aria-label={room.songRequestEnabled === false ? '已禁止点歌' : '允许点歌'}
-                      >
-                        {room.songRequestEnabled === false ? (
-                          <Ban className="w-3.5 h-3.5" />
-                        ) : (
-                          <Music2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </Tooltip>
-                  </>
                 )}
 
               </div>
 
               <p className="text-xs text-netease-muted mt-0.5">
                 房间号 <span className="text-netease-red">{room.id}</span>
+                {pureMode && (
+                  <span className="ml-2 text-[10px] text-white/35">Esc 隐藏/显示播放器</span>
+                )}
               </p>
 
+              {!pureMode && (
               <div className="mt-0.5 flex flex-wrap items-center gap-2">
                 <p className="text-xs text-netease-muted">{room.userCount} 人在线</p>
                 <RoomQualityBadge onClick={() => setQualityOpen(true)} />
                 <RoomFmModeBadge fmMode={room.neteaseFmMode} />
                 {room.songRequestEnabled === false && (
                   <span className="text-[10px] text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded-full">禁止点歌</span>
+                )}
+                {(room.songRequestMinStaySec ?? 0) > 0 && (
+                  <span className="text-[10px] text-white/45 bg-white/5 px-1.5 py-0.5 rounded-full">
+                    进房 {Math.ceil((room.songRequestMinStaySec ?? 0) / 60)} 分钟后可点歌
+                  </span>
+                )}
+                {(room.songRequestMaxPerUser ?? 0) > 0 && (
+                  <span className="text-[10px] text-white/45 bg-white/5 px-1.5 py-0.5 rounded-full">
+                    每人最多 {room.songRequestMaxPerUser} 首待播
+                  </span>
                 )}
                 {room.announcementEnabled && room.announcementText?.trim() && (
                   <button
@@ -1530,9 +1574,11 @@ export default function Room() {
                   </button>
                 )}
               </div>
+              )}
 
             </div>
 
+            {!pureMode && (
             <div className="sm:hidden flex-shrink-0">
 
               <OnlineUsers
@@ -1543,6 +1589,7 @@ export default function Room() {
               />
 
             </div>
+            )}
 
           </div>
 
@@ -1550,7 +1597,22 @@ export default function Room() {
 
             <div className="flex items-center gap-1 sm:gap-2">
 
-              {isLgUp && ROOM_VISUAL_MODE_META[visualMode].hasSettings ? (
+              <Tooltip side="bottom" content={pureMode ? '退出纯净模式（电脑端右侧滑入聊天）' : '纯净模式：隐藏动效与热榜，标签页低调伪装'}>
+                <button
+                  type="button"
+                  onClick={handlePureModeToggle}
+                  className={`flex items-center gap-1.5 text-xs transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card ${
+                    pureMode ? 'text-sky-400' : 'text-netease-muted hover:text-white'
+                  }`}
+                  aria-label={pureMode ? '退出纯净模式' : '开启纯净模式'}
+                  aria-pressed={pureMode}
+                >
+                  <Shield className="w-4 h-4" />
+                  <span className="hidden sm:inline">{pureMode ? '纯净中' : '纯净模式'}</span>
+                </button>
+              </Tooltip>
+
+              {isLgUp && !pureMode && ROOM_VISUAL_MODE_META[visualMode].hasSettings ? (
                 <Tooltip side="bottom" content="视觉参数">
                   <button
                     type="button"
@@ -1563,7 +1625,7 @@ export default function Room() {
                 </Tooltip>
               ) : null}
 
-              {isLgUp ? (
+              {isLgUp && !pureMode ? (
                 <RoomVisualPresetSelect value={visualMode} onChange={handleVisualModeChange} />
               ) : null}
 
@@ -1592,6 +1654,7 @@ export default function Room() {
 
             </div>
 
+            {!pureMode && (
             <div className="hidden sm:block">
 
               <OnlineUsers
@@ -1602,6 +1665,7 @@ export default function Room() {
               />
 
             </div>
+            )}
 
           </div>
 
@@ -1611,28 +1675,22 @@ export default function Room() {
 
 
 
-      <div className="relative z-10 flex-1 min-h-0 max-w-[1680px] mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden">
+      <div className={`relative z-10 flex-1 min-h-0 mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden ${pureMode ? 'max-w-3xl' : 'max-w-[1680px]'}`}>
 
-        <div className="flex flex-col lg:grid lg:grid-cols-[360px_minmax(0,1fr)_360px] lg:h-full lg:min-h-0 gap-3 lg:gap-4">
+        <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[360px_minmax(0,1fr)_360px]'}`}>
 
-          {/* 左侧：点歌热榜 + 为你推荐 */}
-          {isLgUp && (
+          {/* 左侧：点歌热榜 */}
+          {isLgUp && !pureMode && (
             <div className="order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 lg:h-full">
-              <div className="flex min-h-[9rem] flex-[5] flex-col overflow-hidden border-b border-netease-border/50">
-                <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
-              </div>
-              <div className="flex min-h-0 flex-[3.8] flex-col overflow-hidden">
-                <RecommendedPlaylistsPanel onSelectPlaylist={handleRecommendPlaylistSelect} />
-              </div>
+              <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
             </div>
           )}
 
           {/* 中间：搜索 + 播放队列 */}
           <div className="order-1 flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-hidden">
-            {!isLgUp && (
-              <div className="mb-3 space-y-3">
+            {!isLgUp && !pureMode && (
+              <div className="mb-3">
                 <HotSongPanel compact addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
-                <RecommendedPlaylistsPanel compact onSelectPlaylist={handleRecommendPlaylistSelect} />
               </div>
             )}
 
@@ -1640,13 +1698,22 @@ export default function Room() {
               <JumpRequestBanner />
               {searchBar}
               <div className="mb-2 flex items-center justify-between gap-2 overflow-x-auto px-1 sm:mb-4">
-                <button
-                  type="button"
-                  onClick={() => setSongHistoryOpen(true)}
-                  className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
-                >
-                  播放历史
-                </button>
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSongHistoryOpen(true)}
+                    className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                  >
+                    播放历史
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRecommendDrawerOpen(true)}
+                    className="hidden lg:inline-flex rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                  >
+                    热榜歌单
+                  </button>
+                </div>
                 {searchableCount > 0 && (
                   <div className="flex flex-shrink-0 items-center gap-1">
                     <button
@@ -1668,12 +1735,11 @@ export default function Room() {
               </div>
             </div>
 
-            {/* 桌面：播放队列撑满剩余高度，底部与热榜对齐 */}
+            {/* 桌面：播放队列撑满剩余高度 */}
             <div className="hidden lg:flex flex-1 min-h-0 flex-col mt-1">
               {renderQueueSection(true)}
             </div>
 
-            {/* 手机：搜索结果内联展示（保持原样） */}
             <div className="lg:hidden">
               {searching && searchedKeyword && !showPlaylistSearch && <SearchSkeleton />}
               {showPlaylistSkeleton && (
@@ -1737,18 +1803,28 @@ export default function Room() {
                 )
               )}
             </div>
+
+            {pureMode && !isLgUp && (
+              <div className="mt-3 flex-shrink-0">
+                {renderQueueSection()}
+              </div>
+            )}
           </div>
 
-          {/* 右侧：聊天室占满 */}
+          {/* 右侧：聊天室（纯净模式桌面走滑入抽屉，手机内联展示） */}
+          {(!pureMode || !isLgUp) && (
           <div className="order-2 flex min-h-0 min-w-0 flex-col gap-3 lg:h-full lg:min-h-0">
+            {!pureMode && (
             <div className="lg:hidden">
               {renderQueueSection()}
             </div>
+            )}
 
             <div className="h-[300px] sm:h-[320px] lg:h-full lg:min-h-0 lg:flex-1">
               <ChatPanel />
             </div>
           </div>
+          )}
 
         </div>
 
@@ -2055,9 +2131,17 @@ export default function Room() {
 
 
 
-      {(room.current || room.randomLoading) && (
+      {(room.current || room.randomLoading) && !(pureMode && purePlayerHidden) && (
         <MiniPlayer onExpand={() => setShowPlayer(true)} barClassName={ambientGlassClass} />
       )}
+
+      {pureMode && isLgUp && <PureModeChatDock />}
+
+      <RecommendedPlaylistsDrawer
+        open={recommendDrawerOpen}
+        onClose={() => setRecommendDrawerOpen(false)}
+        onSelectPlaylist={handleRecommendPlaylistSelect}
+      />
       </div>
 
 

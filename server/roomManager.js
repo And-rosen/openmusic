@@ -165,6 +165,8 @@ function snapshotRoomForStorage(room) {
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     songRequestEnabled: room.songRequestEnabled !== false,
+    songRequestMinStaySec: normalizeSongRequestMinStaySec(room.songRequestMinStaySec),
+    songRequestMaxPerUser: normalizeSongRequestMaxPerUser(room.songRequestMaxPerUser),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
     createdAt: room.createdAt,
@@ -203,6 +205,8 @@ function restoreRoomFromStorage(data) {
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH);
   room.songRequestEnabled = data.songRequestEnabled !== false;
+  room.songRequestMinStaySec = normalizeSongRequestMinStaySec(data.songRequestMinStaySec);
+  room.songRequestMaxPerUser = normalizeSongRequestMaxPerUser(data.songRequestMaxPerUser);
   room.memberTiers = restoreMemberTiersFromStorage(data.memberTiers);
   room.memberSettings = normalizeMemberSettings(data.memberSettings);
   room.createdAt = data.createdAt ?? Date.now();
@@ -354,6 +358,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     announcementEnabled: false,
     announcementText: '',
     songRequestEnabled: true,
+    songRequestMinStaySec: 0,
+    songRequestMaxPerUser: 0,
     memberTiers: new Map(),
     memberSettings: { ...DEFAULT_MEMBER_SETTINGS },
     createdAt: Date.now(),
@@ -453,6 +459,37 @@ function canUserRequestSong(room, userId) {
 }
 
 const MAX_ANNOUNCEMENT_LENGTH = 2000;
+const MAX_SONG_REQUEST_MIN_STAY_SEC = 24 * 60 * 60;
+const MAX_SONG_REQUEST_PER_USER = 50;
+
+function normalizeSongRequestMinStaySec(value) {
+  const sec = Math.floor(Number(value) || 0);
+  if (!Number.isFinite(sec) || sec < 0) return 0;
+  return Math.min(sec, MAX_SONG_REQUEST_MIN_STAY_SEC);
+}
+
+function normalizeSongRequestMaxPerUser(value) {
+  const count = Math.floor(Number(value) || 0);
+  if (!Number.isFinite(count) || count < 0) return 0;
+  return Math.min(count, MAX_SONG_REQUEST_PER_USER);
+}
+
+function countUserRequestedSongs(room, userId) {
+  const user = room.users.get(userId);
+  let count = 0;
+  if (room.current && isQueueRequester(room.current, userId, user)) count += 1;
+  for (const item of room.queue) {
+    if (isQueueRequester(item, userId, user)) count += 1;
+  }
+  return count;
+}
+
+function formatSongRequestMinStayError(remainSec) {
+  const sec = Math.ceil(Math.max(1, remainSec));
+  if (sec < 60) return `还需等待 ${sec} 秒才能点歌`;
+  const minutes = Math.ceil(sec / 60);
+  return minutes <= 1 ? '还需等待 1 分钟才能点歌' : `还需等待 ${minutes} 分钟才能点歌`;
+}
 
 function removeUserFromAdmins(room, userId) {
   if (!userId) return;
@@ -1029,12 +1066,21 @@ export function setRoomAnnouncement(roomId, actorId, options = {}, connectionId 
   return { room: serializeRoom(room) };
 }
 
-export function setSongRequestEnabled(roomId, actorId, enabled, connectionId = null) {
+export function setSongRequestEnabled(roomId, actorId, options = {}, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: '房间不存在' };
   if (!canModerate(room, actorId)) return { error: '仅房主或管理员可调整点歌设置' };
 
-  room.songRequestEnabled = Boolean(enabled);
+  if (options.enabled !== undefined) {
+    room.songRequestEnabled = Boolean(options.enabled);
+  }
+  if (options.minStaySec !== undefined) {
+    room.songRequestMinStaySec = normalizeSongRequestMinStaySec(options.minStaySec);
+  }
+  if (options.maxPerUser !== undefined) {
+    room.songRequestMaxPerUser = normalizeSongRequestMaxPerUser(options.maxPerUser);
+  }
+
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -1269,6 +1315,25 @@ export async function addToQueue(roomId, song, requestedByUser) {
 
   if (!canUserRequestSong(room, requestedBy.id)) {
     return { error: '房主已禁止点歌' };
+  }
+
+  if (!canControlPlayback(room, requestedBy.id)) {
+    const user = room.users.get(requestedBy.id);
+    const minStaySec = normalizeSongRequestMinStaySec(room.songRequestMinStaySec);
+    if (minStaySec > 0 && user) {
+      const stayedSec = (Date.now() - user.joinedAt) / 1000;
+      if (stayedSec < minStaySec) {
+        return { error: formatSongRequestMinStayError(minStaySec - stayedSec) };
+      }
+    }
+
+    const maxPerUser = normalizeSongRequestMaxPerUser(room.songRequestMaxPerUser);
+    if (maxPerUser > 0) {
+      const count = countUserRequestedSongs(room, requestedBy.id);
+      if (count >= maxPerUser) {
+        return { error: `每人最多 ${maxPerUser} 首待播，你已达上限` };
+      }
+    }
   }
 
   if (isSongInPlaylist(room, song)) {
@@ -2219,6 +2284,8 @@ function serializeRoom(room, options = {}) {
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     songRequestEnabled: room.songRequestEnabled !== false,
+    songRequestMinStaySec: normalizeSongRequestMinStaySec(room.songRequestMinStaySec),
+    songRequestMaxPerUser: normalizeSongRequestMaxPerUser(room.songRequestMaxPerUser),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
   };

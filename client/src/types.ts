@@ -160,6 +160,10 @@ export interface RoomState {
   announcementText?: string;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
+  /** 进房后需等待的秒数才能点歌，0 表示不限制 */
+  songRequestMinStaySec?: number;
+  /** 每人队列中最多保留几首，0 表示不限制 */
+  songRequestMaxPerUser?: number;
   /** 房间贵宾角标（userId → 配置） */
   memberTiers?: Record<string, RoomMemberTier>;
   /** 贵宾欢迎语等房间级设置 */

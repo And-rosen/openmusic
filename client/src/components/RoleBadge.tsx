@@ -1,4 +1,5 @@
 import { Crown, Shield } from 'lucide-react';
+import { usePureModeStore } from '../stores/pureModeStore';
 
 type Role = 'owner' | 'admin';
 
@@ -8,6 +9,17 @@ interface Props {
 }
 
 export default function RoleBadge({ role, className = '' }: Props) {
+  const plain = usePureModeStore((s) => s.enabled);
+  const label = role === 'owner' ? '房主' : '管理';
+
+  if (plain) {
+    return (
+      <span className={`inline-flex flex-shrink-0 text-[10px] leading-4 text-netease-muted/65 ${className}`}>
+        {label}
+      </span>
+    );
+  }
+
   if (role === 'owner') {
     return (
       <span

@@ -787,10 +787,14 @@ if (s.connected) {
     });
   }, []);
 
-  const setSongRequestEnabled = useCallback((enabled: boolean): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+  const setSongRequestEnabled = useCallback((options: {
+    enabled?: boolean;
+    minStaySec?: number;
+    maxPerUser?: number;
+  }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_song_request',
-      { enabled },
+      options,
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {

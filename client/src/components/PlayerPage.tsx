@@ -146,7 +146,7 @@ export default function PlayerPage({ onClose }: Props) {
 
         <div className="flex-1" />
 
-        <Tooltip content={tvCopied ? '已复制 TV 链接' : 'TV 歌词'}>
+        <Tooltip side="bottom" content={tvCopied ? '已复制 TV 链接' : 'TV 歌词'}>
           <button
             type="button"
             onClick={handleCopyTvLink}

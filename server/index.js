@@ -1222,7 +1222,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_song_request', ({ enabled }, callback) => {
+  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
 
@@ -1232,7 +1232,11 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = setSongRequestEnabled(roomId, getSocketUserId(socket), enabled, socket.id);
+    const result = setSongRequestEnabled(roomId, getSocketUserId(socket), {
+      enabled,
+      minStaySec,
+      maxPerUser,
+    }, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

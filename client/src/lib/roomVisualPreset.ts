@@ -1,5 +1,3 @@
-import { isMobileDevice } from './audioUnlock';
-
 const MODE_KEY = 'openmusic:room-visual-mode';
 const FX_KEY = 'openmusic:room-visual-fx';
 
@@ -139,12 +137,11 @@ export function readRoomVisualMode(): RoomVisualMode {
   } catch {
     // ignore
   }
-  return isMobileDevice() ? 'galaxy' : 'cover-bg';
+  return 'off';
 }
 
-/** 与 Room 页实际渲染的背景一致（移动端固定星河） */
+/** 与 Room 页实际渲染的背景一致 */
 export function readEffectiveRoomVisualMode(): RoomVisualMode {
-  if (isMobileDevice()) return 'galaxy';
   return readRoomVisualMode();
 }
 

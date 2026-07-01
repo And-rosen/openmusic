@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -78,6 +79,66 @@ function getTooltipStyle(rect: DOMRect, side: TooltipSide): CSSProperties {
   }
 }
 
+const VIEWPORT_PAD = 12;
+const TOOLTIP_GAP = 8;
+
+function clampTooltipPosition(
+  anchor: DOMRect,
+  side: TooltipSide,
+  tipWidth: number,
+  tipHeight: number,
+): { top: number; left: number } {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const clampH = (left: number) => Math.min(Math.max(left, VIEWPORT_PAD), vw - tipWidth - VIEWPORT_PAD);
+  const clampV = (top: number) => Math.min(Math.max(top, VIEWPORT_PAD), vh - tipHeight - VIEWPORT_PAD);
+  const anchorCx = anchor.left + anchor.width / 2;
+  const anchorCy = anchor.top + anchor.height / 2;
+
+  switch (side) {
+    case 'top': {
+      let top = anchor.top - TOOLTIP_GAP - tipHeight;
+      const left = anchorCx - tipWidth / 2;
+      if (top < VIEWPORT_PAD) top = anchor.bottom + TOOLTIP_GAP;
+      return { top: clampV(top), left: clampH(left) };
+    }
+    case 'bottom': {
+      let top = anchor.bottom + TOOLTIP_GAP;
+      const left = anchorCx - tipWidth / 2;
+      if (top + tipHeight > vh - VIEWPORT_PAD) top = anchor.top - TOOLTIP_GAP - tipHeight;
+      return { top: clampV(top), left: clampH(left) };
+    }
+    case 'left': {
+      let left = anchor.left - TOOLTIP_GAP - tipWidth;
+      const top = anchorCy - tipHeight / 2;
+      if (left < VIEWPORT_PAD) left = anchor.right + TOOLTIP_GAP;
+      return { top: clampV(top), left: clampH(left) };
+    }
+    case 'right': {
+      let left = anchor.right + TOOLTIP_GAP;
+      const top = anchorCy - tipHeight / 2;
+      if (left + tipWidth > vw - VIEWPORT_PAD) left = anchor.left - TOOLTIP_GAP - tipWidth;
+      return { top: clampV(top), left: clampH(left) };
+    }
+    default:
+      return { top: anchor.top, left: anchor.left };
+  }
+}
+
+function getClampedTooltipStyle(
+  anchorRect: DOMRect,
+  tipWidth: number,
+  tipHeight: number,
+  side: TooltipSide,
+): CSSProperties {
+  const pos = clampTooltipPosition(anchorRect, side, tipWidth, tipHeight);
+  return {
+    position: 'fixed',
+    top: pos.top,
+    left: pos.left,
+  };
+}
+
 function getPrefersHover(): boolean {
   if (typeof window === 'undefined') return true;
   return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -107,6 +168,7 @@ export default function Tooltip({
 }: TooltipProps) {
   const tipId = useId();
   const anchorRef = useRef<HTMLElement | null>(null);
+  const tipRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<CSSProperties>({ position: 'fixed', top: 0, left: 0 });
@@ -117,8 +179,20 @@ export default function Tooltip({
   const updatePosition = useCallback(() => {
     const el = anchorRef.current;
     if (!el) return;
-    setStyle(getTooltipStyle(el.getBoundingClientRect(), side));
+    const anchorRect = el.getBoundingClientRect();
+    const tipEl = tipRef.current;
+    if (tipEl) {
+      const tipRect = tipEl.getBoundingClientRect();
+      setStyle(getClampedTooltipStyle(anchorRect, tipRect.width, tipRect.height, side));
+      return;
+    }
+    setStyle(getTooltipStyle(anchorRect, side));
   }, [side]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, content, updatePosition]);
 
   const show = useCallback((immediate = false) => {
     if (!enabled) return;
@@ -214,6 +288,7 @@ export default function Tooltip({
       {wrapped}
       {open && enabled && createPortal(
         <div
+          ref={tipRef}
           id={tipId}
           role="tooltip"
           style={style}

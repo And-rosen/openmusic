@@ -1,5 +1,6 @@
 import type { RoomMemberTier } from '../types';
 import { getMemberBadgeStyle, normalizeBadgeColor } from '../lib/memberTierPresets';
+import { usePureModeStore } from '../stores/pureModeStore';
 
 interface Props {
   tier: Pick<RoomMemberTier, 'badgeLabel' | 'badgeColor'>;
@@ -7,8 +8,17 @@ interface Props {
 }
 
 export default function MemberTierBadge({ tier, className = '' }: Props) {
+  const plain = usePureModeStore((s) => s.enabled);
   const color = normalizeBadgeColor(tier.badgeColor);
   const label = tier.badgeLabel.trim() || '贵宾';
+
+  if (plain) {
+    return (
+      <span className={`inline-flex flex-shrink-0 text-[10px] leading-4 text-netease-muted/65 ${className}`}>
+        {label}
+      </span>
+    );
+  }
 
   return (
     <span

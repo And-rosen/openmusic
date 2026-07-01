@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Crown, MapPin, Pencil, Shield, UserMinus, Users, X } from 'lucide-react';
+import { Check, Clock, Crown, MapPin, Pencil, Shield, UserMinus, Users, X } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
+import { formatStayDuration } from '../lib/formatStayDuration';
 import ConfirmModal from './ConfirmModal';
 import Tooltip from './Tooltip';
 import TruncateTip from './TruncateTip';
@@ -40,7 +41,15 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const [adminTogglingId, setAdminTogglingId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [error, setError] = useState('');
+  const [now, setNow] = useState(() => Date.now());
   const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, [open]);
 
   const visibleUsers = useMemo(
     () => users.filter((user) => !user.readOnly),
@@ -283,7 +292,13 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 flex items-center gap-1 text-[10px] text-netease-muted/70">
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-netease-muted/70">
+                        {!user.offline && user.joinedAt > 0 && (
+                          <span className="inline-flex items-center gap-0.5">
+                            <Clock className="h-3 w-3 flex-shrink-0" />
+                            <span>{formatStayDuration(user.joinedAt, now)}</span>
+                          </span>
+                        )}
                         {!user.offline && (
                           <>
                             <MapPin className="h-3 w-3 flex-shrink-0" />

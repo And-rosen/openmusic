@@ -23,6 +23,7 @@ function playlistKey(playlist: PlaylistSearchItem) {
 interface Props {
   onSelectPlaylist: (playlist: PlaylistSearchItem) => Promise<void>;
   compact?: boolean;
+  hideHeader?: boolean;
 }
 
 function PlatformGlassTag({
@@ -172,7 +173,7 @@ function PlaylistCard({
   );
 }
 
-export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = false }: Props) {
+export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = false, hideHeader = false }: Props) {
   const cached = peekRecommendedPlaylists();
   const [neteasePlaylists, setNeteasePlaylists] = useState(
     () => cached?.neteasePlaylists ?? CURATED_NETEASE,
@@ -289,7 +290,7 @@ export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = 
       <div className="flex flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30">
         <div className="flex flex-shrink-0 items-center gap-1.5 border-b border-netease-border/50 px-3 py-2">
           <Sparkles className="h-3.5 w-3.5 text-sky-400" />
-          <h2 className="text-xs font-medium">为你推荐</h2>
+          <h2 className="text-xs font-medium">热榜歌单</h2>
         </div>
         <div className="overflow-x-auto p-2">
           {loading ? <PlaylistSkeleton compact /> : renderPlaylistHorizontalScroll()}
@@ -300,12 +301,14 @@ export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = 
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {!hideHeader && (
       <div className="flex flex-shrink-0 items-center gap-1.5 border-t border-netease-border/50 px-4 py-1.5 lg:border-t-0">
         <Sparkles className="h-4 w-4 text-sky-400" />
-        <h2 className="text-sm font-medium">为你推荐</h2>
+        <h2 className="text-sm font-medium">热榜歌单</h2>
       </div>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
+      <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 ${hideHeader ? 'pt-3' : ''}`}>
         {loading ? <PlaylistSkeleton /> : renderPlaylistGrid()}
       </div>
     </div>

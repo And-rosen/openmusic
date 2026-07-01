@@ -25,6 +25,32 @@ function seoDevMiddleware() {
 
 export default defineConfig({
   plugins: [react(), seoDevMiddleware()],
+  build: {
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('three') || id.includes('@react-three')) {
+            return;
+          }
+          if (id.includes('socket.io-client')) {
+            return 'socket-vendor';
+          }
+          if (id.includes('lucide-react')) {
+            return 'icons-vendor';
+          }
+          if (
+            id.includes('react-dom')
+            || id.includes('react-router')
+            || /[/\\]react[/\\]/.test(id)
+          ) {
+            return 'react-vendor';
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
