@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { Reply, Smile } from 'lucide-react';
 import type { ChatMessage, ChatReplyRef, RoomMemberTier, RoomUser } from '../types';
 import QFaceImage from './QFaceImage';
@@ -132,20 +132,7 @@ function ChatMessageRow({
   if (msg.kind === 'welcome') {
     if (pureMode) return null;
     return (
-      <div className="flex justify-center py-1">
-        <div className="welcome-chat-card max-w-[92%] rounded-2xl px-4 py-3 text-center">
-          <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
-            {msg.memberTier && <MemberTierBadge tier={msg.memberTier} />}
-            {msg.targetNickname && (
-              <span className="text-sm font-medium text-white">{msg.targetNickname}</span>
-            )}
-          </div>
-          <p className="break-words text-sm leading-6 text-white/95 [overflow-wrap:anywhere]">{msg.text}</p>
-          {msg.timestamp > 0 && (
-            <p className="mt-2 text-[10px] text-netease-muted/70">{formatChatTime(msg.timestamp)}</p>
-          )}
-        </div>
-      </div>
+      <WelcomeChatRow msg={msg} onContentResize={onContentResize} />
     );
   }
 
@@ -330,6 +317,43 @@ function ChatMessageRow({
             </button>
           </Tooltip>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function WelcomeChatRow({
+  msg,
+  onContentResize,
+}: {
+  msg: ChatMessage;
+  onContentResize?: () => void;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!onContentResize) return;
+    const el = rowRef.current;
+    if (!el) return;
+    onContentResize();
+    const ro = new ResizeObserver(() => onContentResize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [msg.id, msg.text, onContentResize]);
+
+  return (
+    <div ref={rowRef} className="flex justify-center py-1">
+      <div className="welcome-chat-card max-w-[92%] rounded-2xl px-4 py-3 text-center">
+        <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
+          {msg.memberTier && <MemberTierBadge tier={msg.memberTier} />}
+          {msg.targetNickname && (
+            <span className="text-sm font-medium text-white">{msg.targetNickname}</span>
+          )}
+        </div>
+        <p className="break-words text-sm leading-6 text-white/95 [overflow-wrap:anywhere]">{msg.text}</p>
+        {msg.timestamp > 0 && (
+          <p className="mt-2 text-[10px] text-netease-muted/70">{formatChatTime(msg.timestamp)}</p>
+        )}
       </div>
     </div>
   );

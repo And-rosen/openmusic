@@ -165,6 +165,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   const [revealedPureImages, setRevealedPureImages] = useState<Set<string>>(() => new Set());
 
   const stickToBottomRef = useRef(true);
+  const pinningToBottomRef = useRef(false);
   const loadingOlderRef = useRef(false);
   const reactionPickerOpenRef = useRef(false);
   const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
@@ -263,6 +264,51 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     };
   }, [chatScrollRoot, finishInitialScroll, scrollToBottomEnd]);
 
+  const pinToBottomWhileSticky = useCallback(() => {
+    pinningToBottomRef.current = true;
+    let frames = 0;
+    let lastHeight = -1;
+    let rafId = 0;
+    let cancelled = false;
+
+    const finish = () => {
+      pinningToBottomRef.current = false;
+    };
+
+    const step = () => {
+      if (cancelled || !stickToBottomRef.current) {
+        finish();
+        return;
+      }
+
+      const el = chatScrollRoot;
+      if (!el) {
+        rafId = requestAnimationFrame(step);
+        return;
+      }
+
+      scrollToBottomEnd('instant');
+      const height = el.scrollHeight;
+      frames += 1;
+      const stable = height === lastHeight && frames >= 2;
+      lastHeight = height;
+
+      if (stable || frames >= 12) {
+        finish();
+        return;
+      }
+      rafId = requestAnimationFrame(step);
+    };
+
+    scrollToBottomEnd('instant');
+    rafId = requestAnimationFrame(step);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      finish();
+    };
+  }, [chatScrollRoot, scrollToBottomEnd]);
+
   const setRowHeight = useCallback((index: number, messageId: string, height: number) => {
     const prev = rowHeightsRef.current.get(messageId);
     if (prev !== undefined && Math.abs(prev - height) < 2) return;
@@ -333,8 +379,13 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
 
       welcomeConfettiCooldownRef.current.set(targetId, now);
       fireWelcomeConfetti(container);
+      if (stickToBottomRef.current) {
+        requestAnimationFrame(() => {
+          scrollToBottomEnd('instant');
+        });
+      }
     }
-  }, [messages, pureMode]);
+  }, [messages, pureMode, scrollToBottomEnd]);
 
   useLayoutEffect(() => {
     if (reactionPickerOpenRef.current) return;
@@ -370,17 +421,21 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     }
 
     if (grew) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage?.kind === 'welcome') {
+        return pinToBottomWhileSticky();
+      }
       scrollToBottomEnd('instant');
     }
 
     prevMessageCountRef.current = messages.length;
-  }, [messages.length, messagesTailKey, chatScrollRoot, useVirtualList, listHeight, finishInitialScroll, pinToBottomUntilStable, scrollToBottomEnd]);
+  }, [messages.length, messagesTailKey, messages, chatScrollRoot, useVirtualList, listHeight, finishInitialScroll, pinToBottomUntilStable, pinToBottomWhileSticky, scrollToBottomEnd]);
 
   const handleScroll = useCallback(() => {
     const el = chatScrollRoot;
     if (!el) return;
 
-    if (!initialScrollDoneRef.current) return;
+    if (!initialScrollDoneRef.current || pinningToBottomRef.current) return;
 
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const atBottom = distanceToBottom < 80;
@@ -473,6 +528,11 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     });
   }, []);
 
+  const handleStickyContentResize = useCallback(() => {
+    if (!stickToBottomRef.current || !initialScrollDoneRef.current || pinningToBottomRef.current) return;
+    scrollToBottomEnd('instant');
+  }, [scrollToBottomEnd]);
+
   const stickToBottomOnSend = useCallback(() => {
     stickToBottomRef.current = true;
     setShowScrollToBottom(false);
@@ -544,6 +604,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
           onOpenReactionPicker={onReactionPickerChange}
           onRevealPureImage={handleRevealPureImage}
           onPreviewImage={onPreviewImage}
+          onContentResize={handleStickyContentResize}
         />
       ))}
       <div ref={bottomAnchorRef} className="h-px w-full shrink-0" aria-hidden />
