@@ -1,7 +1,10 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { getCoverUrl } from '../api/music';
 import type { QueueItem } from '../types';
 import { ROOM_VISUAL_MODE_META, type RoomVisualMode } from '../lib/roomVisualPreset';
+import { roomVisualFxLive, subscribeRoomVisualFx } from '../lib/roomVisualFxLive';
+import { effectiveBackgroundColor } from '../lib/roomVisualAppearance';
+import { syncGalaxyHandGestureMode } from './galaxy/lib/galaxyHandGesture';
 import AmbientCoverLayers from './AmbientCoverLayers';
 
 const GalaxyBackground = lazy(() => import('./galaxy/GalaxyBackground3D'));
@@ -25,8 +28,59 @@ export default function RoomAmbientBackground({
   const showGalaxy = shaderPreset !== undefined;
   const showCoverUnderlay = visualMode === 'cover-bg' && Boolean(coverUrl);
 
+  const [bgStyle, setBgStyle] = useState(() => {
+    const fx = roomVisualFxLive.current;
+    return {
+      color: effectiveBackgroundColor(fx),
+      opacity: fx.backgroundOpacity,
+      media: fx.backgroundMedia,
+    };
+  });
+
+  useEffect(() => {
+    const sync = () => {
+      const fx = roomVisualFxLive.current;
+      setBgStyle({
+        color: effectiveBackgroundColor(fx),
+        opacity: fx.backgroundOpacity,
+        media: fx.backgroundMedia,
+      });
+    };
+    sync();
+    return subscribeRoomVisualFx(sync);
+  }, []);
+
+  const showGalaxyShader = shaderPreset !== undefined;
+
+  useEffect(() => {
+    if (!showGalaxyShader) {
+      void syncGalaxyHandGestureMode('off');
+      return;
+    }
+    void syncGalaxyHandGestureMode(roomVisualFxLive.current.cameraInteraction);
+    return () => {
+      void syncGalaxyHandGestureMode('off');
+    };
+  }, [showGalaxyShader]);
+
   return (
     <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+      {bgStyle.media ? (
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage: `url("${bgStyle.media}")`,
+            opacity: bgStyle.opacity,
+          }}
+        />
+      ) : null}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundColor: bgStyle.color,
+          opacity: bgStyle.media ? Math.min(0.65, bgStyle.opacity) : bgStyle.opacity,
+        }}
+      />
       {visualMode === 'off' ? <div className="absolute inset-0 bg-[#08090b]" /> : null}
       {showCoverUnderlay ? (
         <div className="absolute inset-0">

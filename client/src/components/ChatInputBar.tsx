@@ -1,0 +1,725 @@
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
+import { ImagePlus, Search, Send, Smile, X } from 'lucide-react';
+import type { ChatMention, ChatReplyRef, RoomUser } from '../types';
+import Tooltip from './Tooltip';
+import RoleBadge from './RoleBadge';
+import QFaceImage from './QFaceImage';
+import StickerSearchPanel, { STICKER_SEARCH_PICKER_HEIGHT } from './StickerSearchPanel';
+import { renderReplyRefContent } from './ChatMessageRow';
+import type { ChatRoomMeta } from './ChatMessageRow';
+import {
+  MAX_CHAT_LENGTH,
+  editorHasDraft,
+  editorPlainIncludesAt,
+  getActiveMentionDeleteCount,
+  getMentionQueryBeforeCursor,
+  getSelectedTextLength,
+  serializeEditorElement,
+} from '../lib/chatEditor';
+import {
+  MENTION_ALL_LABEL,
+  buildMentionPrefix,
+  hasMentionAllInText,
+  hasMentionInText,
+  matchesMentionAllQuery,
+  mentionQueryMatchesNickname,
+  stripLeadingMention,
+} from '../lib/chatPanelUtils';
+import {
+  ensureQQFacesLoaded,
+  getInitialQQFaces,
+  hasFullQQFaces,
+  qqFaceToken,
+  requestQFaceImage,
+  subscribeQQFaces,
+  QFaceLoadPriority,
+  type QFaceItem,
+} from '../lib/qface';
+import { uploadChatImage } from '../api/chatImage';
+import { readClipboardImageFile } from '../lib/compressChatImage';
+import { getClientId } from '../lib/clientId';
+
+type MentionOption =
+  | { type: 'all' }
+  | { type: 'user'; user: RoomUser };
+
+export type PendingChatImage = {
+  url: string;
+  key: string;
+  previewUrl: string;
+};
+
+interface Props {
+  roomMeta: ChatRoomMeta;
+  nickname: string;
+  mySocketId: string | null;
+  canControlPlayback: boolean;
+  chatMuted: boolean;
+  chatUploadEnabled: boolean;
+  stickerSearchEnabled: boolean;
+  isMobileLayout: boolean;
+  replyTo: ChatReplyRef | null;
+  onReplyChange: (reply: ChatReplyRef | null) => void;
+  pendingImage: PendingChatImage | null;
+  onPendingImageChange: (image: PendingChatImage | null) => void;
+  chatScrollRoot: HTMLDivElement | null;
+  sendChat: (
+    text: string,
+    options?: {
+      mentions?: ChatMention[];
+      replyTo?: ChatReplyRef | null;
+      imageUrl?: string;
+      imageKey?: string;
+    },
+  ) => Promise<{ success: boolean; error?: string }>;
+  onStickToBottom: () => void;
+  onPreviewImage: (url: string) => void;
+}
+
+export interface ChatInputBarHandle {
+  applyReplyMention: (targetNickname: string) => void;
+  focus: () => void;
+}
+
+const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar({
+  roomMeta,
+  nickname,
+  mySocketId,
+  canControlPlayback,
+  chatMuted,
+  chatUploadEnabled,
+  stickerSearchEnabled,
+  isMobileLayout,
+  replyTo,
+  onReplyChange,
+  pendingImage,
+  onPendingImageChange,
+  chatScrollRoot,
+  sendChat,
+  onStickToBottom,
+  onPreviewImage,
+}, ref) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [qqFaces, setQQFaces] = useState<QFaceItem[]>(() => getInitialQQFaces());
+  const [loadingFaces, setLoadingFaces] = useState(() => !hasFullQQFaces());
+  const [emojiGridRoot, setEmojiGridRoot] = useState<HTMLDivElement | null>(null);
+  const [emojiPickerTab, setEmojiPickerTab] = useState<'faces' | 'search'>('faces');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+
+  const inputRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const emojiPanelRef = useRef<HTMLDivElement>(null);
+  const emojiPickerPortalRef = useRef<HTMLDivElement>(null);
+  const composingRef = useRef(false);
+  const mentionQueryRef = useRef('');
+
+  const mentionNicknames = useMemo(
+    () => roomMeta.users.map((user) => user.nickname),
+    [roomMeta.users],
+  );
+
+  const mentionOptions = useMemo<MentionOption[]>(() => {
+    const uid = mySocketId || getClientId();
+    const query = mentionQuery.trim().toLowerCase();
+    const options: MentionOption[] = [];
+
+    if (canControlPlayback && matchesMentionAllQuery(query)) {
+      options.push({ type: 'all' });
+    }
+
+    const userLimit = options.length > 0 ? 7 : 8;
+    const users = roomMeta.users
+      .filter((user) => user.id !== uid)
+      .filter((user) => !user.readOnly)
+      .filter((user) => mentionQueryMatchesNickname(query, user.nickname))
+      .slice(0, userLimit);
+
+    options.push(...users.map((user) => ({ type: 'user' as const, user })));
+    return options.slice(0, 8);
+  }, [mentionQuery, mySocketId, roomMeta.users, canControlPlayback]);
+
+  useEffect(() => {
+    if (!showEmoji) setEmojiPickerTab('faces');
+  }, [showEmoji]);
+
+  useEffect(() => {
+    if (!showEmoji) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (emojiPanelRef.current?.contains(target)) return;
+      if (emojiPickerPortalRef.current?.contains(target)) return;
+      setShowEmoji(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [showEmoji]);
+
+  useEffect(() => subscribeQQFaces((faces) => {
+    setQQFaces(faces);
+    setLoadingFaces(!hasFullQQFaces());
+  }), []);
+
+  useEffect(() => {
+    if (!showEmoji) return;
+    ensureQQFacesLoaded();
+  }, [showEmoji]);
+
+  const syncEditorState = useCallback(() => {
+    const editor = inputRef.current;
+    if (!editor) return;
+    const draft = editorHasDraft(editor);
+    setHasDraft((prev) => (prev === draft ? prev : draft));
+    const activeQuery = getMentionQueryBeforeCursor(editor);
+    if (activeQuery === null) {
+      if (!editorPlainIncludesAt(editor)) {
+        setShowMentionPicker(false);
+        setMentionQuery('');
+        mentionQueryRef.current = '';
+      }
+      return;
+    }
+    const queryChanged = mentionQueryRef.current !== activeQuery;
+    mentionQueryRef.current = activeQuery;
+    setMentionQuery(activeQuery);
+    const uid = mySocketId || getClientId();
+    const filtered = roomMeta.users
+      .filter((user) => user.id !== uid)
+      .filter((user) => !user.readOnly)
+      .filter((user) => mentionQueryMatchesNickname(activeQuery, user.nickname));
+    const showAll = canControlPlayback && matchesMentionAllQuery(activeQuery);
+    setShowMentionPicker(filtered.length > 0 || showAll);
+    if (queryChanged) setMentionIndex(0);
+  }, [canControlPlayback, mySocketId, roomMeta.users]);
+
+  const insertPlainText = useCallback((value: string) => {
+    const editor = inputRef.current;
+    if (!editor) {
+      setHasDraft(Boolean(value.trim()));
+      setShowMentionPicker(false);
+      return;
+    }
+    editor.focus();
+    document.execCommand('insertText', false, value);
+    syncEditorState();
+  }, [syncEditorState]);
+
+  const setEditorPlainText = useCallback((value: string) => {
+    const editor = inputRef.current;
+    if (!editor) {
+      setHasDraft(Boolean(value.trim()));
+      return;
+    }
+    editor.textContent = value;
+    syncEditorState();
+    requestAnimationFrame(() => {
+      editor.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+  }, [syncEditorState]);
+
+  const clearEditor = useCallback(() => {
+    if (inputRef.current) inputRef.current.textContent = '';
+    setHasDraft(false);
+    setShowMentionPicker(false);
+    setMentionQuery('');
+    mentionQueryRef.current = '';
+    setMentionIndex(0);
+  }, []);
+
+  const buildMentions = useCallback((messageText: string) => {
+    const uid = mySocketId || getClientId();
+    if (hasMentionAllInText(messageText)) {
+      return roomMeta.users
+        .filter((user) => user.id !== uid && !user.readOnly)
+        .map((user) => ({ id: user.id, nickname: user.nickname }));
+    }
+    return roomMeta.users
+      .filter((user) => hasMentionInText(messageText, user.nickname))
+      .slice(0, 10)
+      .map((user) => ({ id: user.id, nickname: user.nickname }));
+  }, [mySocketId, roomMeta.users]);
+
+  const clearPendingImage = useCallback(() => {
+    onPendingImageChange(null);
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  }, [onPendingImageChange]);
+
+  const submitChatImage = useCallback(async (file: File) => {
+    if (chatMuted || uploadingImage) return;
+    setError('');
+    setUploadingImage(true);
+    try {
+      const uploaded = await uploadChatImage(roomMeta.id, file);
+      onPendingImageChange({
+        url: uploaded.url,
+        key: uploaded.key,
+        previewUrl: uploaded.previewUrl,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '图片上传失败');
+    } finally {
+      setUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  }, [chatMuted, onPendingImageChange, roomMeta.id, uploadingImage]);
+
+  const handleImagePick = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await submitChatImage(file);
+  };
+
+  const handleSend = async () => {
+    const messageText = serializeEditorElement(inputRef.current).trim();
+    const currentImage = pendingImage;
+    if ((!messageText && !currentImage) || sending) return;
+
+    const mentions = buildMentions(messageText);
+    const currentReplyTo = replyTo;
+
+    onStickToBottom();
+    clearEditor();
+    onReplyChange(null);
+    clearPendingImage();
+    setSending(true);
+    setError('');
+
+    const res = await sendChat(messageText, {
+      mentions,
+      replyTo: currentReplyTo,
+      imageUrl: currentImage?.url,
+      imageKey: currentImage?.key,
+    });
+    if (!res.success) {
+      insertPlainText(messageText);
+      onReplyChange(currentReplyTo);
+      if (currentImage) onPendingImageChange(currentImage);
+      setError(res.error || '发送失败');
+    }
+    setSending(false);
+  };
+
+  const handleSendSticker = async (imageUrl: string) => {
+    if (chatMuted || sending) throw new Error(chatMuted ? '当前无法发送' : '正在发送');
+
+    const currentReplyTo = replyTo;
+    onStickToBottom();
+    onReplyChange(null);
+    setSending(true);
+    setError('');
+
+    const res = await sendChat('', { imageUrl, replyTo: currentReplyTo });
+    if (!res.success) {
+      onReplyChange(currentReplyTo);
+      setError(res.error || '发送失败');
+      setSending(false);
+      throw new Error(res.error || '发送失败');
+    }
+
+    setSending(false);
+    setShowEmoji(false);
+    setEmojiPickerTab('faces');
+  };
+
+  const deleteTextBeforeCursor = (count: number) => {
+    const editor = inputRef.current;
+    if (!editor || count <= 0) return;
+    editor.focus();
+    for (let i = 0; i < count; i += 1) {
+      document.execCommand('delete', false, 'Backward');
+    }
+  };
+
+  const handleMentionOption = (option: MentionOption) => {
+    const editor = inputRef.current;
+    if (editor) {
+      const deleteCount = getActiveMentionDeleteCount(editor);
+      if (deleteCount > 0) deleteTextBeforeCursor(deleteCount);
+    }
+    const token = option.type === 'all'
+      ? `@${MENTION_ALL_LABEL} `
+      : `@${option.user.nickname} `;
+    insertPlainText(token);
+    setShowMentionPicker(false);
+    setMentionQuery('');
+    mentionQueryRef.current = '';
+    setMentionIndex(0);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const insertEmoji = (face: QFaceItem) => {
+    const editor = inputRef.current;
+    const token = qqFaceToken(face.id);
+    if (!editor) {
+      setHasDraft(true);
+      return;
+    }
+    if (serializeEditorElement(editor).length - getSelectedTextLength(editor) + token.length > MAX_CHAT_LENGTH) {
+      setError(`消息最多 ${MAX_CHAT_LENGTH} 字`);
+      editor.focus();
+      setShowMentionPicker(false);
+      return;
+    }
+    void requestQFaceImage(face.id, QFaceLoadPriority.MESSAGE).then(() => {
+      const img = document.createElement('img');
+      img.src = face.url;
+      img.alt = face.text;
+      img.title = face.text;
+      img.dataset.qqFaceId = face.id;
+      img.contentEditable = 'false';
+      img.className = 'mx-0.5 inline-block h-5 w-auto max-w-6 object-contain align-[-0.2em]';
+      const selection = window.getSelection();
+      let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const anchorNode = selection?.anchorNode;
+      if (!range || !anchorNode || !editor.contains(anchorNode)) {
+        range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+      }
+      range.deleteContents();
+      range.insertNode(img);
+      range.setStartAfter(img);
+      range.collapse(true);
+      requestAnimationFrame(() => {
+        editor.focus();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        syncEditorState();
+      });
+    });
+  };
+
+  const applyReplyMention = useCallback((targetNickname: string) => {
+    const body = stripLeadingMention(serializeEditorElement(inputRef.current), mentionNicknames);
+    const editor = inputRef.current;
+    if (!editor) {
+      setHasDraft(true);
+      return;
+    }
+    editor.textContent = '';
+    setHasDraft(true);
+    insertPlainText(`${buildMentionPrefix(targetNickname)}${body}`.slice(0, MAX_CHAT_LENGTH));
+  }, [insertPlainText]);
+
+  useImperativeHandle(ref, () => ({
+    applyReplyMention,
+    focus: () => inputRef.current?.focus(),
+  }), [applyReplyMention]);
+
+  const renderEmojiPickerContent = (gridClassName: string) => {
+    if (emojiPickerTab === 'search') {
+      return (
+        <StickerSearchPanel
+          disabled={chatMuted || sending}
+          onBack={() => setEmojiPickerTab('faces')}
+          onPick={handleSendSticker}
+        />
+      );
+    }
+
+    return (
+      <>
+        <div className="mb-1.5 flex flex-shrink-0 items-center justify-between px-1">
+          <span className="text-[11px] text-netease-muted">QQNT 表情</span>
+          <div className="flex items-center gap-1.5">
+            {stickerSearchEnabled && (
+              <Tooltip content="搜索表情包">
+                <button
+                  type="button"
+                  onClick={() => setEmojiPickerTab('search')}
+                  className="rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                  aria-label="搜索表情包"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+            )}
+            {loadingFaces && (
+              <span className="text-[11px] text-netease-muted/60">正在补全...</span>
+            )}
+          </div>
+        </div>
+        <div ref={setEmojiGridRoot} className={gridClassName}>
+          {qqFaces.map((face) => (
+            <Tooltip key={face.id} content={face.text}>
+              <button
+                type="button"
+                data-face-id={face.id}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertEmoji(face)}
+                className="flex h-8 items-center justify-center rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
+                aria-label={face.text}
+              >
+                <QFaceImage
+                  id={face.id}
+                  priority={QFaceLoadPriority.PANEL}
+                  nearPriority={QFaceLoadPriority.NEAR}
+                  observeRoot={emojiGridRoot}
+                  className="h-6 w-auto max-w-7 object-contain"
+                  placeholderClassName="h-6 w-6"
+                />
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+      </>
+    );
+  };
+
+  const mobileEmojiPickerPortal = showEmoji && isMobileLayout ? (
+    <div className="fixed inset-0 z-[80]">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40"
+        onClick={() => setShowEmoji(false)}
+        aria-label="关闭表情"
+      />
+      <div
+        ref={emojiPickerPortalRef}
+        className={`absolute inset-x-0 bottom-0 flex flex-col rounded-t-2xl border-t border-netease-border/70 bg-netease-dark/98 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur ${emojiPickerTab === 'search' ? '' : 'max-h-[min(68vh,480px)]'}`}
+        style={emojiPickerTab === 'search' ? { height: STICKER_SEARCH_PICKER_HEIGHT } : undefined}
+      >
+        {renderEmojiPickerContent('grid min-h-0 flex-1 grid-cols-8 gap-0.5 overflow-y-auto overscroll-contain px-0.5 py-0.5')}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <div className="flex-shrink-0 border-t border-netease-border/50 p-2">
+        {chatMuted && (
+          <p className="mb-1.5 text-center text-xs text-amber-400/90">
+            {roomMeta.muteAll ? '房主已开启全体禁言' : '你已被禁言，无法发送消息'}
+          </p>
+        )}
+        {replyTo && (
+          <div className="mb-1.5 flex items-center justify-between rounded-xl bg-white/5 px-2 py-1 text-xs text-netease-muted">
+            <span className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden leading-5">
+              <span className="flex-shrink-0">回复 {replyTo.nickname}：</span>
+              <span className="min-w-0 overflow-hidden">{renderReplyRefContent(replyTo, chatScrollRoot, mentionNicknames)}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (replyTo) {
+                  const current = serializeEditorElement(inputRef.current);
+                  const stripped = stripLeadingMention(current, mentionNicknames);
+                  if (stripped !== current) setEditorPlainText(stripped);
+                }
+                onReplyChange(null);
+              }}
+              className="ml-2 rounded p-0.5 hover:bg-white/10"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+        {error && <p className="mb-1 text-xs text-netease-red">{error}</p>}
+        {pendingImage && (
+          <div className="mb-1.5 flex items-center gap-2 rounded-xl bg-white/5 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => onPreviewImage(pendingImage.previewUrl)}
+              className="flex-shrink-0 cursor-zoom-in overflow-hidden rounded-lg"
+              aria-label="预览待发送图片"
+            >
+              <img
+                src={pendingImage.previewUrl}
+                alt="待发送图片"
+                className="h-14 w-14 object-cover"
+              />
+            </button>
+            <span className="min-w-0 flex-1 truncate text-xs text-netease-muted">
+              {uploadingImage ? '正在压缩并上传…' : '已选择图片，可附带文字后发送'}
+            </span>
+            <button
+              type="button"
+              onClick={clearPendingImage}
+              className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white"
+              aria-label="移除图片"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+        <div className="relative flex items-center gap-2" ref={emojiPanelRef}>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            className="hidden"
+            onChange={(event) => { void handleImagePick(event); }}
+          />
+          {showEmoji && !isMobileLayout && (
+            <div
+              className={`absolute bottom-full left-0 z-20 mb-2 box-border flex w-full max-w-full flex-col rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-2 shadow-2xl backdrop-blur ${emojiPickerTab === 'search' ? '' : 'max-h-80'}`}
+              style={emojiPickerTab === 'search' ? { height: STICKER_SEARCH_PICKER_HEIGHT } : undefined}
+            >
+              {renderEmojiPickerContent('grid max-h-64 grid-cols-8 gap-0.5 overflow-y-auto overscroll-contain px-0.5 py-0.5')}
+            </div>
+          )}
+          <Tooltip content="QQ 表情">
+            <button
+              type="button"
+              onClick={() => setShowEmoji((value) => !value)}
+              disabled={chatMuted}
+              className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-netease-border/50 transition-colors disabled:opacity-40 ${showEmoji ? 'border-netease-red/30 bg-netease-red/15 text-netease-red' : 'bg-netease-dark text-netease-muted hover:bg-white/5 hover:text-white'}`}
+              aria-label="QQ 表情"
+            >
+              <Smile className="h-4 w-4" />
+            </button>
+          </Tooltip>
+          {chatUploadEnabled && (
+            <Tooltip content="发送图片（支持粘贴截图）">
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={chatMuted || uploadingImage || sending}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-netease-border/50 bg-netease-dark text-netease-muted transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
+                aria-label="发送图片"
+              >
+                <ImagePlus className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          )}
+          <div className="relative min-w-0 flex-1">
+            {showMentionPicker && (
+              <div className="absolute bottom-full left-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-1.5 shadow-2xl backdrop-blur">
+                {mentionOptions.map((option, index) => (
+                  option.type === 'all' ? (
+                    <button
+                      key="mention-all"
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setMentionIndex(index)}
+                      onClick={() => handleMentionOption(option)}
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${index === mentionIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
+                    >
+                      <span className="min-w-0 truncate text-sky-300">@{MENTION_ALL_LABEL}</span>
+                      <span className="ml-2 flex-shrink-0 text-[10px] text-sky-400/80">全员</span>
+                    </button>
+                  ) : (
+                    <button
+                      key={option.user.id}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setMentionIndex(index)}
+                      onClick={() => handleMentionOption(option)}
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${index === mentionIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
+                    >
+                      <span className="min-w-0 truncate">{option.user.nickname}</span>
+                      {option.user.id === roomMeta.creatorId && <RoleBadge role="owner" className="ml-2" />}
+                      {option.user.id !== roomMeta.creatorId && roomMeta.adminIds.includes(option.user.id) && (
+                        <RoleBadge role="admin" className="ml-2" />
+                      )}
+                    </button>
+                  )
+                ))}
+              </div>
+            )}
+            {!hasDraft && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-netease-muted/50">{nickname || '你'}说点什么...</span>}
+            <div
+              ref={inputRef}
+              role="textbox"
+              aria-label="聊天输入框"
+              contentEditable={!chatMuted}
+              suppressContentEditableWarning
+              onBeforeInput={(event) => {
+                const nativeEvent = event.nativeEvent as InputEvent;
+                const inputType = nativeEvent.inputType ?? '';
+                if (inputType.startsWith('delete') || nativeEvent.isComposing) return;
+                const editor = inputRef.current;
+                if (!editor) return;
+                const data = nativeEvent.data || '';
+                if (serializeEditorElement(editor).length - getSelectedTextLength(editor) + data.length > MAX_CHAT_LENGTH) {
+                  event.preventDefault();
+                  setError(`消息最多 ${MAX_CHAT_LENGTH} 字`);
+                }
+              }}
+              onInput={syncEditorState}
+              onPaste={(event) => {
+                if (chatUploadEnabled && !chatMuted && !uploadingImage) {
+                  const clipboardFile = readClipboardImageFile(event.clipboardData);
+                  if (clipboardFile) {
+                    event.preventDefault();
+                    void submitChatImage(clipboardFile);
+                    return;
+                  }
+                }
+
+                event.preventDefault();
+                const editor = inputRef.current;
+                if (!editor) return;
+                const remaining = MAX_CHAT_LENGTH - serializeEditorElement(editor).length + getSelectedTextLength(editor);
+                if (remaining <= 0) return setError(`消息最多 ${MAX_CHAT_LENGTH} 字`);
+                document.execCommand('insertText', false, event.clipboardData.getData('text/plain').slice(0, remaining));
+                syncEditorState();
+              }}
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={() => { composingRef.current = false; syncEditorState(); }}
+              onKeyDown={(event) => {
+                if (showMentionPicker && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                  event.preventDefault();
+                  setMentionIndex((current) => {
+                    const delta = event.key === 'ArrowDown' ? 1 : -1;
+                    return (current + delta + mentionOptions.length) % mentionOptions.length;
+                  });
+                  return;
+                }
+                if (showMentionPicker && (event.key === 'Tab' || event.key === 'Enter')) {
+                  event.preventDefault();
+                  const option = mentionOptions[mentionIndex];
+                  if (option) handleMentionOption(option);
+                  return;
+                }
+                if (event.key === 'Escape' && showMentionPicker) {
+                  event.preventDefault();
+                  setShowMentionPicker(false);
+                  setMentionIndex(0);
+                  return;
+                }
+                if (event.key !== 'Enter') return;
+                if (event.nativeEvent.isComposing || composingRef.current) return;
+                event.preventDefault();
+                void handleSend();
+              }}
+              className={`h-9 overflow-x-auto overflow-y-hidden whitespace-nowrap rounded-xl border border-netease-border/50 bg-netease-dark px-3 py-1.5 text-sm leading-6 text-white focus:border-netease-red/40 focus:outline-none ${chatMuted ? 'opacity-50 pointer-events-none' : ''}`}
+            />
+          </div>
+          <button
+            onClick={() => { void handleSend(); }}
+            disabled={sending || uploadingImage || (!hasDraft && !pendingImage) || chatMuted}
+            className="rounded-xl bg-netease-red px-3 py-1.5 text-white transition-colors hover:bg-red-500 disabled:opacity-40"
+          >
+            <Send className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {mobileEmojiPickerPortal && createPortal(mobileEmojiPickerPortal, document.body)}
+    </>
+  );
+});
+
+export default ChatInputBar;

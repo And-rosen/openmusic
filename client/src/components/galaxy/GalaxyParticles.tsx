@@ -24,6 +24,7 @@ import {
   snapshotCoverToPrevTexture,
   snapshotEdgeToPrevTexture,
 } from './lib/coverCanvas';
+import { updateLyricPaletteFromCover } from '../../lib/stageLyricPaletteLive';
 import { startCoverColorMixTween } from './lib/coverColorMix';
 import { tweenCoverDepthUniforms } from './lib/coverDepthTween';
 import { createGalaxyRippleSystem } from './lib/galaxyRipples';
@@ -39,6 +40,12 @@ import {
   registerParticleRootGroup,
   syncParticleGroupRotation,
 } from './lib/galaxyGestureRotation';
+import { updateGalaxyParticlePointerFrame } from './lib/galaxyParticlePointer';
+import {
+  galaxyHandGestureLive,
+  registerGalaxyGestureBurst,
+  tickGalaxyHandGesture,
+} from './lib/galaxyHandGesture';
 import { galaxyOrbitRef } from './lib/galaxyOrbit';
 import GalaxyStageLyrics from './GalaxyStageLyrics';
 import GalaxyFloatingSongCard from './GalaxyFloatingSongCard';
@@ -480,6 +487,13 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
   }, [backCoverLayer.points, floatLayer.points]);
 
   useEffect(() => {
+    registerGalaxyGestureBurst((amount) => {
+      uniforms.uBurstAmt.value = Math.max(uniforms.uBurstAmt.value as number, amount);
+    });
+    return () => registerGalaxyGestureBurst(null);
+  }, [uniforms]);
+
+  useEffect(() => {
     if (presetRef.current !== preset) {
       const fromPreset = presetRef.current;
       presetRef.current = preset;
@@ -536,6 +550,8 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       if (fx.visualTintMode === 'auto') {
         (uniforms.uTintColor.value as THREE.Color).set(sampleCoverAccentColor(cv));
       }
+
+      updateLyricPaletteFromCover(cv);
 
       floatLayer.refreshColorsFromCover(cv);
       backCoverLayer.refreshColorsFromCover(cv);
@@ -614,14 +630,20 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
   }, [backCoverLayer, coverUrl, floatLayer, preset, uniforms]);
 
   useFrame((state, delta) => {
+    updateGalaxyParticlePointerFrame(state.camera);
     const currentFx = roomVisualFxLive.current;
     syncGalaxyFxUniforms(uniforms, currentFx);
-    uniforms.uMouseActive.value +=
-      ((galaxyPointerField.active ? 1 : 0) - (uniforms.uMouseActive.value as number)) * Math.min(1, delta * 7.5);
-    (uniforms.uMouseXY.value as THREE.Vector2).lerp(
-      new THREE.Vector2(galaxyPointerField.x, galaxyPointerField.y),
+    (uniforms.uMouseXY.value as THREE.Vector2).set(galaxyPointerField.x, galaxyPointerField.y);
+    uniforms.uMouseActive.value = galaxyPointerField.active ? 1 : 0;
+
+    tickGalaxyHandGesture(delta);
+    const hand = galaxyHandGestureLive;
+    (uniforms.uHandXY.value as THREE.Vector2).lerp(
+      new THREE.Vector2(hand.handX, hand.handY),
       Math.min(1, delta * 9),
     );
+    uniforms.uHandActive.value += (hand.handActive - (uniforms.uHandActive.value as number)) * Math.min(1, delta * 7.5);
+    uniforms.uGestureGrip.value += (hand.gestureGrip - (uniforms.uGestureGrip.value as number)) * Math.min(1, delta * 8);
 
     const nextGrid = gridForResolution(currentFx.coverResolution);
     if (nextGrid !== gridRef.current) {

@@ -1,11 +1,13 @@
 import { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { RoomVisualPresetId } from '../../lib/roomVisualPreset';
+import GalaxyBeatMapDriver from './GalaxyBeatMapDriver';
 import GalaxyAudioDriver from './GalaxyAudioDriver';
 import GalaxyCameraRig from './GalaxyCameraRig';
 import GalaxyOrbitControls from './GalaxyOrbitControls';
 import GalaxyParticles from './GalaxyParticles';
-import GalaxyBeatMapDriver from './GalaxyBeatMapDriver';
+import GalaxyGestureSceneBridge from './GalaxyGestureSceneBridge';
+import GestureHudOverlay from './GestureHudOverlay';
 import type { QueueItem } from '../../types';
 
 interface Props {
@@ -27,6 +29,7 @@ export default function GalaxyBackground3D({
 }: Props) {
   return (
     <div className={`${className} overflow-hidden bg-[#08090b]`} aria-hidden>
+      <GestureHudOverlay />
       <Canvas
         className="!absolute inset-0 h-full w-full"
         style={{ width: '100%', height: '100%', display: 'block' }}
@@ -46,6 +49,7 @@ export default function GalaxyBackground3D({
         <color attach="background" args={['#08090b']} />
         <Suspense fallback={null}>
           <GalaxyBeatMapDriver song={song} isPlaying={isPlaying} />
+          <GalaxyGestureSceneBridge />
           <GalaxyAudioDriver preset={preset} />
           <GalaxyOrbitControls preset={preset} />
           <GalaxyCameraRig preset={preset} immersivePanelFocus={immersivePanelFocus} />

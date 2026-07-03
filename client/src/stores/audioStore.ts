@@ -35,6 +35,8 @@ interface AudioStore {
   setSmoothPlaybackTime: (time: number) => void;
   playbackVersion: number;
   setPlaybackVersion: (playbackVersion: number) => void;
+  trackReloadNonce: number;
+  requestTrackReload: () => void;
   volume: number;
   setVolume: (volume: number) => void;
 }
@@ -60,6 +62,8 @@ export const useAudioStore = create<AudioStore>((set) => ({
   setSmoothPlaybackTime: (smoothPlaybackTime) => set({ smoothPlaybackTime }),
   playbackVersion: 0,
   setPlaybackVersion: (playbackVersion) => set({ playbackVersion }),
+  trackReloadNonce: 0,
+  requestTrackReload: () => set((state) => ({ trackReloadNonce: state.trackReloadNonce + 1 })),
   volume: readStoredVolume(),
   setVolume: (volume) => {
     const next = Math.min(1, Math.max(0, volume));

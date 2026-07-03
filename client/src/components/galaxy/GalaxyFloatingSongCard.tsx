@@ -72,7 +72,9 @@ export default function GalaxyFloatingSongCard() {
   const drawKeyRef = useRef<string[]>([]);
   const hoverRef = useRef<number[]>([]);
   const pulseRef = useRef<number[]>([]);
-  const presenceRef = useRef(0);
+  const presenceRef = useRef(
+    roomVisualFxLive.current.shelfPresence === 'always' ? 1 : 0,
+  );
   const raycasterRef = useRef(new THREE.Raycaster());
   const actionRegionsRef = useRef<FloatingSongCardActionRegion[][]>([]);
   const hoveredCardRef = useRef<number>(-1);
@@ -386,7 +388,7 @@ export default function GalaxyFloatingSongCard() {
     const presenceTarget = fx.shelfMode === 'stage' ? stagePresenceTarget : sidePresenceTarget;
     presenceRef.current += (presenceTarget - presenceRef.current) * 0.08;
 
-    const dynamicCamera = fx.shelfCameraMode === 'dynamic' && fx.cameraInteraction === 'gesture';
+    const dynamicCamera = fx.shelfCameraMode === 'dynamic';
     const focusCard =
       hoveredIndex >= 0 &&
       dynamicCamera &&
@@ -439,6 +441,7 @@ export default function GalaxyFloatingSongCard() {
         bass: entry.song.isCurrent ? bands.bass : 0,
       };
 
+      const dofBlur = Math.max(0, Math.min(1, (pose.absD - 0.45) / 3.2));
       const drawKey = [
         entry.song.queueId,
         i,
@@ -453,6 +456,7 @@ export default function GalaxyFloatingSongCard() {
         accent,
         isHovered ? hoveredActionRef.current || '' : '',
         isCenter ? '1' : '0',
+        Math.round(dofBlur * 10),
         item.actions.map((action) => `${action.id}:${action.active ? 1 : 0}:${action.badge || ''}`).join(','),
       ].join('|');
 
@@ -466,6 +470,7 @@ export default function GalaxyFloatingSongCard() {
           fx.shelfBgOpacity,
           isHovered ? hoveredActionRef.current : null,
           redraw,
+          dofBlur,
         );
         built.texture.needsUpdate = true;
       };
@@ -478,9 +483,13 @@ export default function GalaxyFloatingSongCard() {
       }
 
       const stackOpacity = pose.absD < 0.5 ? 1 : Math.max(0.22, 1 - pose.absD * 0.3);
-      (mesh.material as THREE.MeshBasicMaterial).opacity = Math.min(
+      const passiveAlways = fx.shelfPresence === 'always';
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+      mat.color.setScalar(passiveAlways ? (isCenter ? 1 : 0.96) : 1);
+      const passiveDim = passiveAlways && !isCenter ? 0.92 : 1;
+      mat.opacity = Math.min(
         1,
-        (presenceRef.current + (pulseRef.current[i] || 0) * 0.1) * fx.shelfOpacity * stackOpacity,
+        (presenceRef.current + (pulseRef.current[i] || 0) * 0.1) * fx.shelfOpacity * stackOpacity * passiveDim,
       );
     }
   });

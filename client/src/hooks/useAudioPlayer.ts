@@ -159,11 +159,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const needsAudioUnlock = useAudioStore((s) => s.needsAudioUnlock);
   const setRetryPlayback = useAudioStore((s) => s.setRetryPlayback);
   const playbackVersion = useAudioStore((s) => s.playbackVersion);
+  const trackReloadNonce = useAudioStore((s) => s.trackReloadNonce);
   const { togglePlay, seek, skipSong, finishSong } = useSocket();
 
   const endedTrackKey = useRef<string | null>(null);
   const loadGeneration = useRef(0);
   const loadLockRef = useRef<LoadLock>(EMPTY_LOAD_LOCK);
+  const lastTrackReloadNonceRef = useRef(0);
   const [loadRetryNonce, setLoadRetryNonce] = useState(0);
   const skippingRef = useRef(false);
   const justSkippedRef = useRef(false);
@@ -531,6 +533,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     const trackKey = trackKeyOf(current);
 
+    if (trackReloadNonce !== lastTrackReloadNonceRef.current) {
+      lastTrackReloadNonceRef.current = trackReloadNonce;
+      clearAudioQueueBinding(controller.audio);
+      loadLockRef.current = EMPTY_LOAD_LOCK;
+    }
+
     if (prevQueueIdRef.current && prevQueueIdRef.current !== current.queueId) {
       loadGeneration.current += 1;
       loadLockRef.current = EMPTY_LOAD_LOCK;
@@ -694,6 +702,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     room?.current?.queueId,
     room?.current?.source,
     loadRetryNonce,
+    trackReloadNonce,
     tvMode,
     initAudio,
     controller,

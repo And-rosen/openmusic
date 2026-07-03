@@ -1,3 +1,5 @@
+import type { LyricFontKey } from './lyricStyle';
+
 const MODE_KEY = 'openmusic:room-visual-mode';
 const FX_KEY = 'openmusic:room-visual-fx';
 
@@ -87,6 +89,15 @@ export interface RoomVisualFxSettings {
   cameraDistance: number;
   visualTintColor: string;
   visualTintMode: 'auto' | 'custom';
+  uiAccentColor: string;
+  homeAccentColor: string;
+  homeIconColor: string;
+  visualIconColor: string;
+  backgroundColorMode: 'cover' | 'custom';
+  backgroundColor: string;
+  backgroundOpacity: number;
+  controlGlassChromaticOffset: number;
+  backgroundMedia: string | null;
   lyricGlowStrength: number;
   lyricScale: number;
   lyricOffsetX: number;
@@ -99,6 +110,16 @@ export interface RoomVisualFxSettings {
   lyricGlowParticles: boolean;
   lyricCameraLock: boolean;
   particleLyrics: boolean;
+  lyricColorMode: 'auto' | 'custom';
+  lyricColor: string;
+  lyricHighlightMode: 'auto' | 'custom';
+  lyricHighlightColor: string;
+  lyricGlowLinked: boolean;
+  lyricGlowColor: string;
+  lyricFont: LyricFontKey;
+  lyricLetterSpacing: number;
+  lyricLineHeight: number;
+  lyricWeight: number;
   shelfMode: 'off' | 'side' | 'stage';
   shelfCameraMode: 'dynamic' | 'static';
   shelfPresence: 'auto' | 'always';
@@ -134,6 +155,15 @@ export const DEFAULT_ROOM_VISUAL_FX: RoomVisualFxSettings = {
   cameraDistance: 1.0,
   visualTintColor: '#9db8cf',
   visualTintMode: 'auto',
+  uiAccentColor: '#00f5d4',
+  homeAccentColor: '#00f5d4',
+  homeIconColor: '#f4d28a',
+  visualIconColor: '#7fd8ff',
+  backgroundColorMode: 'cover',
+  backgroundColor: '#000000',
+  backgroundOpacity: 1,
+  controlGlassChromaticOffset: 90,
+  backgroundMedia: null,
   lyricGlowStrength: 0.28,
   lyricScale: 1.0,
   lyricOffsetX: 0,
@@ -146,7 +176,17 @@ export const DEFAULT_ROOM_VISUAL_FX: RoomVisualFxSettings = {
   lyricGlowParticles: false,
   lyricCameraLock: false,
   particleLyrics: true,
-  shelfMode: 'off',
+  lyricColorMode: 'auto',
+  lyricColor: '#a9b8c8',
+  lyricHighlightMode: 'auto',
+  lyricHighlightColor: '#fac900',
+  lyricGlowLinked: true,
+  lyricGlowColor: '#008aff',
+  lyricFont: 'hei',
+  lyricLetterSpacing: 0,
+  lyricLineHeight: 1.0,
+  lyricWeight: 900,
+  shelfMode: 'side',
   shelfCameraMode: 'static',
   shelfPresence: 'always',
   shelfShowPodcasts: false,
@@ -177,6 +217,16 @@ export function defaultLyricFxPatch(): Partial<RoomVisualFxSettings> {
     lyricTiltY: DEFAULT_ROOM_VISUAL_FX.lyricTiltY,
     particleLyrics: DEFAULT_ROOM_VISUAL_FX.particleLyrics,
     lyricCameraLock: DEFAULT_ROOM_VISUAL_FX.lyricCameraLock,
+    lyricColorMode: DEFAULT_ROOM_VISUAL_FX.lyricColorMode,
+    lyricColor: DEFAULT_ROOM_VISUAL_FX.lyricColor,
+    lyricHighlightMode: DEFAULT_ROOM_VISUAL_FX.lyricHighlightMode,
+    lyricHighlightColor: DEFAULT_ROOM_VISUAL_FX.lyricHighlightColor,
+    lyricGlowLinked: DEFAULT_ROOM_VISUAL_FX.lyricGlowLinked,
+    lyricGlowColor: DEFAULT_ROOM_VISUAL_FX.lyricGlowColor,
+    lyricFont: DEFAULT_ROOM_VISUAL_FX.lyricFont,
+    lyricLetterSpacing: DEFAULT_ROOM_VISUAL_FX.lyricLetterSpacing,
+    lyricLineHeight: DEFAULT_ROOM_VISUAL_FX.lyricLineHeight,
+    lyricWeight: DEFAULT_ROOM_VISUAL_FX.lyricWeight,
   };
 }
 
@@ -184,7 +234,7 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-function normalizeHexColor(input: string, fallback: string): string {
+export function normalizeHexColor(input: string, fallback: string): string {
   const raw = String(input || '').trim();
   if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw.toLowerCase();
   return fallback;
@@ -275,6 +325,19 @@ export function readRoomVisualFx(): RoomVisualFxSettings {
       cameraDistance: clamp(Number(parsed.cameraDistance) || DEFAULT_ROOM_VISUAL_FX.cameraDistance, 0.55, 1.65),
       visualTintColor: normalizeHexColor(parsed.visualTintColor || '', DEFAULT_ROOM_VISUAL_FX.visualTintColor),
       visualTintMode: parsed.visualTintMode === 'custom' ? 'custom' : 'auto',
+      uiAccentColor: normalizeHexColor(parsed.uiAccentColor || '', DEFAULT_ROOM_VISUAL_FX.uiAccentColor),
+      homeAccentColor: normalizeHexColor(parsed.homeAccentColor || '', DEFAULT_ROOM_VISUAL_FX.homeAccentColor),
+      homeIconColor: normalizeHexColor(parsed.homeIconColor || '', DEFAULT_ROOM_VISUAL_FX.homeIconColor),
+      visualIconColor: normalizeHexColor(parsed.visualIconColor || '', DEFAULT_ROOM_VISUAL_FX.visualIconColor),
+      backgroundColorMode: parsed.backgroundColorMode === 'custom' ? 'custom' : 'cover',
+      backgroundColor: normalizeHexColor(parsed.backgroundColor || '', DEFAULT_ROOM_VISUAL_FX.backgroundColor),
+      backgroundOpacity: clamp(Number(parsed.backgroundOpacity) ?? DEFAULT_ROOM_VISUAL_FX.backgroundOpacity, 0, 1),
+      controlGlassChromaticOffset: clamp(
+        Number(parsed.controlGlassChromaticOffset) ?? DEFAULT_ROOM_VISUAL_FX.controlGlassChromaticOffset,
+        0,
+        140,
+      ),
+      backgroundMedia: typeof parsed.backgroundMedia === 'string' && parsed.backgroundMedia ? parsed.backgroundMedia : null,
       cinema: parsed.cinema !== false,
       floatLayer: parsed.floatLayer !== false,
       lyricGlowStrength: clamp(
@@ -293,6 +356,24 @@ export function readRoomVisualFx(): RoomVisualFxSettings {
       lyricGlowParticles: parsed.lyricGlowParticles === true,
       lyricCameraLock: parsed.lyricCameraLock === true,
       particleLyrics: parsed.particleLyrics !== false,
+      lyricColorMode: parsed.lyricColorMode === 'custom' ? 'custom' : 'auto',
+      lyricColor: normalizeHexColor(parsed.lyricColor || '', DEFAULT_ROOM_VISUAL_FX.lyricColor),
+      lyricHighlightMode: parsed.lyricHighlightMode === 'custom' ? 'custom' : 'auto',
+      lyricHighlightColor: normalizeHexColor(
+        parsed.lyricHighlightColor || '',
+        DEFAULT_ROOM_VISUAL_FX.lyricHighlightColor,
+      ),
+      lyricGlowLinked: parsed.lyricGlowLinked !== false,
+      lyricGlowColor: normalizeHexColor(parsed.lyricGlowColor || '', DEFAULT_ROOM_VISUAL_FX.lyricGlowColor),
+      lyricFont: (() => {
+        const raw = String(parsed.lyricFont || DEFAULT_ROOM_VISUAL_FX.lyricFont);
+        return /^(sans|hei|song|bold-song|stone-song|kai-song|serif-en|gothic|editorial|humanist|mono|display)$/.test(raw)
+          ? raw as RoomVisualFxSettings['lyricFont']
+          : DEFAULT_ROOM_VISUAL_FX.lyricFont;
+      })(),
+      lyricLetterSpacing: clamp(Number(parsed.lyricLetterSpacing) ?? DEFAULT_ROOM_VISUAL_FX.lyricLetterSpacing, -0.04, 0.18),
+      lyricLineHeight: clamp(Number(parsed.lyricLineHeight) || DEFAULT_ROOM_VISUAL_FX.lyricLineHeight, 0.86, 1.35),
+      lyricWeight: clamp(Number(parsed.lyricWeight) || DEFAULT_ROOM_VISUAL_FX.lyricWeight, 500, 900),
       shelfMode: parsed.shelfMode === 'side' || parsed.shelfMode === 'stage' ? parsed.shelfMode : 'off',
       shelfCameraMode: parsed.shelfCameraMode === 'dynamic' ? 'dynamic' : 'static',
       shelfPresence: parsed.shelfPresence === 'auto' ? 'auto' : 'always',

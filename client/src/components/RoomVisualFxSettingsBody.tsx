@@ -21,7 +21,10 @@ export type VisualFxSliderKey =
   | 'lyricOffsetY'
   | 'lyricOffsetZ'
   | 'lyricTiltX'
-  | 'lyricTiltY';
+  | 'lyricTiltY'
+  | 'lyricLetterSpacing'
+  | 'lyricLineHeight'
+  | 'lyricWeight';
 
 interface SliderDef {
   key: VisualFxSliderKey;
@@ -58,11 +61,17 @@ export const MOTION_FX_SLIDERS: SliderDef[] = [
 export const LYRIC_FX_SLIDERS: SliderDef[] = [
   { key: 'lyricGlowStrength', label: '歌词溢光', min: 0, max: 0.85, step: 0.01 },
   { key: 'lyricScale', label: '歌词大小', min: 0.35, max: 1.65, step: 0.01 },
-  { key: 'lyricOffsetX', label: '水平位置', min: -2, max: 2, step: 0.01 },
-  { key: 'lyricOffsetY', label: '垂直位置', min: -1.2, max: 1.35, step: 0.01 },
-  { key: 'lyricOffsetZ', label: '景深位置', min: -1.6, max: 1.6, step: 0.01 },
-  { key: 'lyricTiltX', label: '上下角度', min: -42, max: 42, step: 1 },
-  { key: 'lyricTiltY', label: '左右角度', min: -42, max: 42, step: 1 },
+  { key: 'lyricOffsetX', label: '左右位置', min: -2, max: 2, step: 0.01 },
+  { key: 'lyricOffsetY', label: '上下位置', min: -1.2, max: 1.35, step: 0.01 },
+  { key: 'lyricOffsetZ', label: '前后景深', min: -1.6, max: 1.6, step: 0.01 },
+  { key: 'lyricTiltX', label: '上下旋转', min: -42, max: 42, step: 1 },
+  { key: 'lyricTiltY', label: '左右旋转', min: -42, max: 42, step: 1 },
+];
+
+export const LYRIC_TYPOGRAPHY_SLIDERS: SliderDef[] = [
+  { key: 'lyricLetterSpacing', label: '字间距', min: -0.04, max: 0.18, step: 0.005 },
+  { key: 'lyricLineHeight', label: '行距', min: 0.86, max: 1.35, step: 0.01 },
+  { key: 'lyricWeight', label: '字重', min: 500, max: 900, step: 50 },
 ];
 
 export const ADVANCED_FX_SLIDERS: SliderDef[] = [
@@ -169,6 +178,64 @@ export function FxToggle({
             checked ? 'translate-x-4' : 'translate-x-0'
           }`}
         />
+      </button>
+    </div>
+  );
+}
+
+export function FxMineradioSlider({
+  def,
+  value,
+  defaultValue,
+  onLiveChange,
+  onDragStart,
+  onReset,
+}: {
+  def: SliderDef;
+  value: number;
+  defaultValue: number;
+  onLiveChange: (v: number) => void;
+  onDragStart: () => void;
+  onReset: () => void;
+}) {
+  const display = def.formatValue ? def.formatValue(value) : value.toFixed(def.step < 0.01 ? 3 : def.step < 1 ? 2 : 0);
+  const pct = rangePct(value, def.min, def.max);
+
+  return (
+    <div className="fx-slider pointer-events-auto select-none">
+      <label>{def.label}</label>
+      <input
+        type="range"
+        min={def.min}
+        max={def.max}
+        step={def.step}
+        value={value}
+        style={{ ['--range-pct' as string]: pct }}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onDragStart();
+        }}
+        onInput={(e) => onLiveChange(Number(e.currentTarget.value))}
+        onChange={(e) => onLiveChange(Number(e.currentTarget.value))}
+        aria-label={def.label}
+      />
+      <output>{display}</output>
+      <button
+        type="button"
+        className="fx-reset-one"
+        title="恢复当前滑条默认值"
+        aria-label="恢复当前滑条默认值"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onReset();
+          onLiveChange(defaultValue);
+        }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M3 12a9 9 0 1 0 3-6.7" />
+          <path d="M3 4v5h5" />
+        </svg>
       </button>
     </div>
   );

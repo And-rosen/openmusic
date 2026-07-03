@@ -28,13 +28,14 @@ import {
   clearPureModeDisguise,
 } from '../lib/roomPureMode';
 
-import { songKey } from '../api/music';
+import { songKey, getCoverUrl } from '../api/music';
 import SongCover from '../components/SongCover';
 
 import QueuePanel from '../components/QueuePanel';
 
 import MiniPlayer from '../components/MiniPlayer';
 import ImmersiveExitModal from '../components/immersive/ImmersiveExitModal';
+import ImmersiveEntryOverlay from '../components/immersive/ImmersiveEntryOverlay';
 
 import RoomAmbientBackground from '../components/RoomAmbientBackground';
 
@@ -111,6 +112,7 @@ import {
   patchRoomVisualFx,
   roomVisualFxLive,
 } from '../lib/roomVisualFxLive';
+import { prepareImmersiveEnter } from '../lib/immersiveEntry';
 
 
 function roomPasswordKey(roomId: string) {
@@ -272,6 +274,9 @@ export default function Room() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [hotRefreshKey, setHotRefreshKey] = useState(0);
   const [immersiveExitPromptOpen, setImmersiveExitPromptOpen] = useState(false);
+  const [immersiveEntering, setImmersiveEntering] = useState(false);
+  const [immersiveRevealing, setImmersiveRevealing] = useState(false);
+  const immersiveEnteringRef = useRef(false);
   const [visualMode, setVisualMode] = useState<RoomVisualMode>(readRoomVisualMode);
   const [immersivePanelFocus, setImmersivePanelFocus] = useState<'search' | 'queue' | 'chat' | null>(null);
   const [visualFx, setVisualFx] = useState<RoomVisualFxSettings>(() => {
@@ -320,6 +325,15 @@ export default function Room() {
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
   }, []);
+
+  useEffect(() => {
+    const onVisualToast = (e: Event) => {
+      const detail = (e as CustomEvent<{ message: string; type?: 'success' | 'error' }>).detail;
+      if (detail?.message) showToast(detail.message, detail.type || 'success');
+    };
+    window.addEventListener('openmusic:visual-toast', onVisualToast);
+    return () => window.removeEventListener('openmusic:visual-toast', onVisualToast);
+  }, [showToast]);
 
   const closeToast = useCallback(() => setToast(null), []);
 
@@ -1131,13 +1145,53 @@ export default function Room() {
       setImmersiveExitPromptOpen(true);
       return;
     }
-    if (visualMode === 'cover-bg') {
-      applyVisualMode('emily', { notifyProxyChange: false });
-    }
-    setImmersiveModeEnabled(true);
-    setVisualFxOpen(false);
-    showToast('已进入沉浸模式', 'success');
-  }, [applyVisualMode, immersiveMode, setImmersiveModeEnabled, showToast, visualMode]);
+    if (immersiveEnteringRef.current) return;
+
+    const liveRoom = useRoomStore.getState().room;
+    const currentSong = liveRoom?.current ?? null;
+    const targetMode: RoomVisualMode = visualMode === 'cover-bg' ? 'emily' : visualMode;
+    const needsModeSwitch = visualMode === 'cover-bg';
+    const needsProxyReload =
+      Boolean(currentSong)
+      && shouldProxySongPlaybackUrl(targetMode)
+      && !shouldProxySongPlaybackUrl(visualMode);
+
+    immersiveEnteringRef.current = true;
+    setImmersiveEntering(true);
+    setImmersiveRevealing(false);
+
+    void (async () => {
+      try {
+        if (needsModeSwitch) {
+          applyVisualMode('emily', { notifyProxyChange: false });
+        }
+
+        await prepareImmersiveEnter({
+          song: currentSong,
+          needsProxyReload,
+        });
+
+        setImmersiveModeEnabled(true);
+        setVisualFxOpen(false);
+        setImmersiveRevealing(true);
+        await new Promise((resolve) => window.setTimeout(resolve, 720));
+        showToast('已进入沉浸模式', 'success');
+      } catch (error) {
+        console.error('Failed to enter immersive mode:', error);
+        showToast('沉浸模式加载失败，请重试', 'error');
+      } finally {
+        immersiveEnteringRef.current = false;
+        setImmersiveRevealing(false);
+        setImmersiveEntering(false);
+      }
+    })();
+  }, [
+    applyVisualMode,
+    immersiveMode,
+    setImmersiveModeEnabled,
+    showToast,
+    visualMode,
+  ]);
 
   useEffect(() => {
     if (!showImmersiveEntry && immersiveMode) {
@@ -1611,6 +1665,12 @@ export default function Room() {
 
     <div className="relative isolate flex h-full flex-col overflow-hidden">
 
+      <ImmersiveEntryOverlay
+        visible={immersiveEntering}
+        revealing={immersiveRevealing}
+        coverUrl={room.current ? getCoverUrl(room.current, 'medium') : null}
+      />
+
       <RoomAmbientBackground
         song={room.current}
         visualMode={displayVisualMode}
@@ -1642,6 +1702,7 @@ export default function Room() {
               visualMode={visualMode}
               onVisualModeChange={handleVisualModeChange}
               onDraggingChange={setVisualFxDragging}
+              coverUrl={room.current ? getCoverUrl(room.current, 'medium') : null}
             />
           }
           player={
@@ -1891,7 +1952,8 @@ export default function Room() {
                   <button
                     type="button"
                     onClick={handleImmersiveToggle}
-                    className={`flex items-center gap-1.5 text-xs transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card ${
+                    disabled={immersiveEntering}
+                    className={`flex items-center gap-1.5 text-xs transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card disabled:opacity-50 disabled:pointer-events-none ${
                       immersiveMode ? 'text-violet-300' : 'text-netease-muted hover:text-white'
                     }`}
                     aria-label={immersiveMode ? '退出沉浸模式' : '进入沉浸模式'}

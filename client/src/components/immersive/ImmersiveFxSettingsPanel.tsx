@@ -1,12 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { RoomVisualFxSettings, RoomVisualMode } from '../../lib/roomVisualPreset';
 import { DEFAULT_ROOM_VISUAL_FX, defaultLyricFxPatch } from '../../lib/roomVisualPreset';
+import { defaultLyricTypographyPatch } from '../../lib/lyricStyle';
 import RoomVisualPresetGrid from '../RoomVisualPresetGrid';
+import ImmersiveLyricFxControls from './ImmersiveLyricFxControls';
+import ImmersiveAppearanceControls from './ImmersiveAppearanceControls';
 import {
+  FxMineradioSlider,
   FxMineradioToggle,
   FxSectionLabel,
-  FxSlider,
-  LYRIC_FX_SLIDERS,
   MOTION_FX_SLIDERS,
   ADVANCED_FX_SLIDERS,
 } from '../RoomVisualFxSettingsBody';
@@ -28,6 +30,7 @@ interface Props {
   visualMode: RoomVisualMode;
   onVisualModeChange: (mode: RoomVisualMode) => void;
   onDraggingChange?: (dragging: boolean) => void;
+  coverUrl?: string | null;
 }
 
 type LocalSliderDef = {
@@ -47,14 +50,21 @@ function renderSliders(
 ) {
   return defs.map((def) => {
     const hidden = draggingKey !== null && draggingKey !== def.key;
+    const key = def.key as keyof RoomVisualFxSettings;
+    const current = value[key] as number;
+    const defaultValue = (DEFAULT_ROOM_VISUAL_FX[key] as number) ?? current;
     return (
-      <div key={String(def.key)} className={`fx-slider ${hidden ? 'pointer-events-none invisible' : ''}`}>
-        <FxSlider
+      <div key={String(def.key)} className={hidden ? 'pointer-events-none invisible' : ''}>
+        <FxMineradioSlider
           def={def as never}
-          value={value[def.key] as number}
+          value={current}
+          defaultValue={defaultValue}
           onDragStart={() => setDraggingKey(String(def.key))}
           onLiveChange={(v) => {
             onPatch('patch' in def && def.patch ? def.patch(v, value) : { [def.key]: v });
+          }}
+          onReset={() => {
+            onPatch('patch' in def && def.patch ? def.patch(defaultValue, value) : { [def.key]: defaultValue });
           }}
         />
       </div>
@@ -121,6 +131,7 @@ export default function ImmersiveFxSettingsPanel({
   visualMode,
   onVisualModeChange,
   onDraggingChange,
+  coverUrl,
 }: Props) {
   const [tab, setTab] = useState<ImmersiveFxTab>('preset');
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -181,34 +192,14 @@ export default function ImmersiveFxSettingsPanel({
 
         {tab === 'appearance' ? (
           <div className="fx-tab-page active" role="tabpanel">
-            <FxSectionLabel>自定义颜色</FxSectionLabel>
-            <div className={`lyric-color-row ${dragging ? 'pointer-events-none invisible' : ''}`}>
-              <input
-                type="color"
-                className="lyric-color-picker"
-                value={value.visualTintColor}
-                title="视觉主色"
-                onChange={(e) =>
-                  onPatch({ visualTintColor: e.target.value.toLowerCase(), visualTintMode: 'custom' })
-                }
-              />
-              <div className="fx-color-row-label">
-                视觉主色
-                <small>{value.visualTintMode === 'auto' ? '封面取色' : value.visualTintColor}</small>
-              </div>
-              <button
-                type="button"
-                className="fx-mini-btn ghost"
-                onClick={() =>
-                  onPatch({
-                    visualTintMode: 'auto',
-                    visualTintColor: DEFAULT_ROOM_VISUAL_FX.visualTintColor,
-                  })
-                }
-              >
-                封面
-              </button>
-            </div>
+            <ImmersiveAppearanceControls
+              value={value}
+              onPatch={onPatch}
+              coverUrl={coverUrl}
+              dragging={dragging}
+              draggingKey={draggingKey}
+              setDraggingKey={setDraggingKey}
+            />
           </div>
         ) : null}
 
@@ -250,32 +241,26 @@ export default function ImmersiveFxSettingsPanel({
             </FxFold>
 
             <FxFold
-              title="位置与角度"
-              subtitle="大小 / 景深 / 旋转"
+              title="歌词外观"
+              subtitle="颜色 / 字体 / 位置"
               open={openFolds.lyricPosition}
               onToggle={() => toggleFold('lyricPosition')}
             >
-              <FxSectionLabel>歌词溢光强度</FxSectionLabel>
-              {renderSliders(
-                LYRIC_FX_SLIDERS.filter((d) => d.key === 'lyricGlowStrength'),
-                value,
-                onPatch,
-                draggingKey,
-                setDraggingKey,
-              )}
-
-              <FxSectionLabel>位置与角度</FxSectionLabel>
-              {renderSliders(
-                LYRIC_FX_SLIDERS.filter((d) => d.key !== 'lyricGlowStrength'),
-                value,
-                onPatch,
-                draggingKey,
-                setDraggingKey,
-              )}
+              <ImmersiveLyricFxControls
+                value={value}
+                onPatch={onPatch}
+                draggingKey={draggingKey}
+                setDraggingKey={setDraggingKey}
+                dragging={dragging}
+              />
             </FxFold>
 
             <div className={`fx-actions ${dragging ? 'pointer-events-none invisible' : ''}`}>
-              <button type="button" className="fx-mini-btn" onClick={() => onPatch(defaultLyricFxPatch())}>
+              <button
+                type="button"
+                className="fx-mini-btn"
+                onClick={() => onPatch({ ...defaultLyricFxPatch(), ...defaultLyricTypographyPatch() })}
+              >
                 恢复默认
               </button>
             </div>

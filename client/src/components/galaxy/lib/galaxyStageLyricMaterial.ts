@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 
+import { roomVisualFxLive } from '../../../lib/roomVisualFxLive';
+import { stageLyricPaletteLive } from '../../../lib/stageLyricPaletteLive';
+import {
+  drawTextWithLetterSpacing,
+  lyricFontCss,
+  lyricLetterSpacingPx,
+  normalizeLyricFontKey,
+} from '../../../lib/lyricStyle';
+import { normalizeHexColor } from '../../../lib/roomVisualPreset';
 import { makeDotTexture } from './dotTexture';
 import type { StageLyricStageRoot } from './galaxyStageLyrics3D';
 
@@ -15,7 +24,7 @@ export type LyricMaskAsset = {
   text: string;
 };
 
-const LYRIC_PALETTE = {
+const LYRIC_PALETTE_FALLBACK = {
   primary: new THREE.Color('#d6f8ff'),
   highlight: new THREE.Color('#eef7ff'),
   glow: new THREE.Color('#9cffdf'),
@@ -24,11 +33,129 @@ const LYRIC_PALETTE = {
   sunHot: new THREE.Color('#fff4cc'),
 };
 
+function cssColorToThreeColor(css: string, fallback: string): THREE.Color {
+  const c = new THREE.Color(fallback || '#d6f8ff');
+  const value = String(css || fallback || '#d6f8ff').trim();
+  try {
+    if (/^#[0-9a-f]{3}$/i.test(value) || /^#[0-9a-f]{6}$/i.test(value)) {
+      c.set(normalizeHexColor(value, '#d6f8ff'));
+      return c;
+    }
+    const m = value.match(/^rgba?\(\s*([.\d]+)\s*,\s*([.\d]+)\s*,\s*([.\d]+)/i);
+    if (m) {
+      c.setRGB(
+        Math.max(0, Math.min(255, parseFloat(m[1]))) / 255,
+        Math.max(0, Math.min(255, parseFloat(m[2]))) / 255,
+        Math.max(0, Math.min(255, parseFloat(m[3]))) / 255,
+      );
+      return c;
+    }
+    c.setStyle(value);
+  } catch {
+    try {
+      c.set(normalizeHexColor(fallback || '#d6f8ff', '#d6f8ff'));
+    } catch {
+      // ignore
+    }
+  }
+  return c;
+}
+
+/** Mineradio lyricThreeColor */
+function lyricThreeColor(css: string, fallback: string, minLum?: number): THREE.Color {
+  const c = cssColorToThreeColor(css, fallback || '#d6f8ff');
+  const lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  const floor = minLum == null ? 0.34 : minLum;
+  if (lum < floor) {
+    const lift = floor - lum;
+    c.r = Math.min(1, c.r + lift);
+    c.g = Math.min(1, c.g + lift);
+    c.b = Math.min(1, c.b + lift);
+  }
+  return c;
+}
+
+/** Mineradio applyLyricPaletteToMesh */
+export function applyLyricPaletteToMesh(mesh: LyricMeshGroup | null | undefined): void {
+  if (!mesh?.userData?.lyric) return;
+  const pal = stageLyricPaletteLive.palette;
+  const data = mesh.userData.lyric;
+  if (data.textMat?.uniforms) {
+    const u = data.textMat.uniforms;
+    if (u.uBaseColor) u.uBaseColor.value.copy(lyricThreeColor(pal.primary, '#d6f8ff', 0.38));
+    if (u.uHiColor) u.uHiColor.value.copy(lyricThreeColor(pal.highlight || pal.primary, '#fff0b8', 0.48));
+    if (u.uGlowColor) {
+      u.uGlowColor.value.copy(
+        lyricThreeColor(pal.glowColor || pal.secondary || pal.primary, '#9cffdf', 0.36),
+      );
+    }
+    if (u.uSolarColor) {
+      u.uSolarColor.value.copy(
+        lyricThreeColor(pal.highlight || pal.secondary || pal.primary, '#fff0b8', 0.5),
+      );
+    }
+    data.textMat.needsUpdate = true;
+  }
+  if (data.glowMat) {
+    data.glowMat.color.copy(
+      lyricThreeColor(pal.glowColor || pal.secondary || pal.primary, '#9cffdf', 0.36),
+    );
+  }
+  if (data.sparkMat?.uniforms?.uColor) {
+    data.sparkMat.uniforms.uColor.value.copy(
+      lyricThreeColor(pal.highlight || pal.secondary || pal.primary, '#fff0b8', 0.46),
+    );
+  }
+  if (data.sunMat) {
+    data.sunMat.color.copy(
+      lyricThreeColor(pal.highlight || pal.secondary || pal.primary, '#fff0b8', 0.5),
+    );
+  }
+}
+
+function applyStonePrintTexture(ctx: CanvasRenderingContext2D, W: number, H: number, _fontSize: number): void {
+  if (normalizeLyricFontKey(roomVisualFxLive.current.lyricFont) !== 'stone-song') return;
+  const bandTop = H * 0.1;
+  const bandH = H * 0.8;
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  const noiseW = 300;
+  const noiseH = 110;
+  const noise = document.createElement('canvas');
+  noise.width = noiseW;
+  noise.height = noiseH;
+  const nctx = noise.getContext('2d');
+  if (!nctx) {
+    ctx.restore();
+    return;
+  }
+  const img = nctx.createImageData(noiseW, noiseH);
+  for (let p = 0; p < noiseW * noiseH; p++) {
+    const x0 = p % noiseW;
+    const y0 = Math.floor(p / noiseW);
+    const vein = Math.sin(x0 * 0.19 + y0 * 0.043) * 0.1 + Math.sin(y0 * 0.31) * 0.06;
+    const r = Math.random() + vein;
+    let a = 0;
+    if (r > 0.82) a = 78 + Math.random() * 92;
+    else if (r > 0.62) a = 22 + Math.random() * 54;
+    else if (r > 0.48) a = 4 + Math.random() * 24;
+    img.data[p * 4] = 255;
+    img.data[p * 4 + 1] = 255;
+    img.data[p * 4 + 2] = 255;
+    img.data[p * 4 + 3] = a;
+  }
+  nctx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = 0.34;
+  ctx.drawImage(noise, 0, bandTop, W, bandH);
+  ctx.restore();
+}
+
 let sunBloomTexture: THREE.CanvasTexture | null = null;
 let sharedDotTexture: THREE.CanvasTexture | null = null;
 
 function lyricFont(fontSize: number): string {
-  return `700 ${fontSize}px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif`;
+  return lyricFontCss(roomVisualFxLive.current, fontSize);
 }
 
 function measuredTextWidth(mask: LyricMaskAsset): number {
@@ -53,7 +180,9 @@ export function buildLyricMaskAsset(text: string): LyricMaskAsset {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(text, W / 2, H / 2);
+  const spacing = lyricLetterSpacingPx(roomVisualFxLive.current, fontSize);
+  drawTextWithLetterSpacing(ctx, text, W / 2, H / 2, spacing);
+  applyStonePrintTexture(ctx, W, H, fontSize);
 
   ctx.save();
   ctx.globalCompositeOperation = 'destination-in';
@@ -264,10 +393,10 @@ export function createStageLyricShaderMaterial(mask: LyricMaskAsset): THREE.Shad
       uTextMin: { value: mask.textMin },
       uTextMax: { value: mask.textMax },
       uOpacity: { value: 0 },
-      uBaseColor: { value: LYRIC_PALETTE.primary.clone() },
-      uHiColor: { value: LYRIC_PALETTE.highlight.clone() },
-      uGlowColor: { value: LYRIC_PALETTE.glow.clone() },
-      uSolarColor: { value: LYRIC_PALETTE.solar.clone() },
+      uBaseColor: { value: LYRIC_PALETTE_FALLBACK.primary.clone() },
+      uHiColor: { value: LYRIC_PALETTE_FALLBACK.highlight.clone() },
+      uGlowColor: { value: LYRIC_PALETTE_FALLBACK.glow.clone() },
+      uSolarColor: { value: LYRIC_PALETTE_FALLBACK.solar.clone() },
       uFeather: { value: 0.045 },
       uSolar: { value: 0 },
     },
@@ -355,8 +484,8 @@ function createStarRiver(dotTex: THREE.CanvasTexture): THREE.Points {
       uWidth: { value: 3.4 },
       uHeight: { value: 0.58 },
       uOpacity: { value: 0 },
-      uColorA: { value: LYRIC_PALETTE.glow.clone() },
-      uColorB: { value: LYRIC_PALETTE.highlight.clone() },
+      uColorA: { value: LYRIC_PALETTE_FALLBACK.glow.clone() },
+      uColorB: { value: LYRIC_PALETTE_FALLBACK.highlight.clone() },
     },
     vertexShader: `
       precision highp float;
@@ -453,7 +582,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     depthTest: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
-    color: LYRIC_PALETTE.sunWarm.clone(),
+    color: LYRIC_PALETTE_FALLBACK.sunWarm.clone(),
   });
   const sun = new THREE.Mesh(new THREE.PlaneGeometry(sunWorldW, sunWorldH), sunMat);
   sun.renderOrder = 40;
@@ -477,7 +606,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     depthTest: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
-    color: LYRIC_PALETTE.glow.clone(),
+    color: LYRIC_PALETTE_FALLBACK.glow.clone(),
     alphaTest: 0.02,
   });
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowWorldWClamped, glowWorldHClamped, 1, 1), glowMat);
@@ -525,7 +654,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
       uMap: { value: sharedDotTexture },
       uSize: { value: 0.052 },
       uOpacity: { value: 0 },
-      uColor: { value: LYRIC_PALETTE.highlight.clone() },
+      uColor: { value: LYRIC_PALETTE_FALLBACK.highlight.clone() },
       uPixel: { value: Math.min(window.devicePixelRatio || 1, 1.75) },
     },
     vertexShader: `
@@ -580,6 +709,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     worldH,
   };
 
+  applyLyricPaletteToMesh(group);
   return group;
 }
 

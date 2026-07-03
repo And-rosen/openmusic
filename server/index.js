@@ -385,7 +385,7 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
   return fetchUrl;
 }
 
-async function proxyMetingResponse(targetUrl, res, thumbPx = 0) {
+async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '') {
   const response = await fetchWithTimeout(targetUrl, { redirect: 'manual' });
 
   if (response.status >= 300 && response.status < 400) {
@@ -393,7 +393,14 @@ async function proxyMetingResponse(targetUrl, res, thumbPx = 0) {
     if (location && thumbPx > 0) {
       location = resizeCoverForThumb(location, thumbPx);
     }
-    if (location) return res.redirect(response.status, location);
+    if (location) {
+      // type=url/lrc 必须返回文本 URL，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
+      if (metingType === 'url' || metingType === 'lrc') {
+        const body = location.startsWith('@') ? location.slice(1) : location;
+        return res.type('text').send(body);
+      }
+      return res.redirect(response.status, location);
+    }
   }
 
   const contentType = response.headers.get('content-type') || '';
@@ -540,7 +547,7 @@ app.get('/api/meting', async (req, res) => {
     const thumbPx = parseInt(String(req.query.size || ''), 10) || 0;
     const query = { ...req.query };
     delete query.size;
-    await proxyMetingResponse(buildMetingUrl(query), res, thumbPx);
+    await proxyMetingResponse(buildMetingUrl(query), res, thumbPx, String(query.type || ''));
   } catch (err) {
     console.error('Meting proxy error:', err.message);
     res.status(502).json({ error: '无法连接 Meting API，请检查 METING_API_URL 配置' });

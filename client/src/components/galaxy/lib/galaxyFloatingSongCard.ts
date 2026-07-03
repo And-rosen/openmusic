@@ -173,21 +173,22 @@ export function drawFloatingSongCard(
   bgOpacity: number,
   hoveredActionId: FloatingSongCardActionId | null,
   onCoverRequest: () => void,
+  dofBlur = 0,
 ): FloatingSongCardActionRegion[] {
   const W = canvas.width;
   const H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   const pad = 18;
   const isNow = item.tag === '正在播放';
-  const cardBgOpacity = Math.min(1, Math.max(0.12, bgOpacity));
+  const cardBgOpacity = Math.min(0.98, Math.max(0.25, bgOpacity));
   const regions: FloatingSongCardActionRegion[] = [];
 
   makeRoundRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 32);
-  ctx.fillStyle = `rgba(0,0,0,${(0.12 + cardBgOpacity * 0.5).toFixed(3)})`;
+  ctx.fillStyle = `rgba(0,0,0,${cardBgOpacity.toFixed(3)})`;
   ctx.fill();
   const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, `rgba(255,255,255,${(0.03 + cardBgOpacity * 0.08).toFixed(3)})`);
-  grad.addColorStop(1, `rgba(255,255,255,${(0.006 + cardBgOpacity * 0.02).toFixed(3)})`);
+  grad.addColorStop(0, 'rgba(255,255,255,0.10)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.018)');
   ctx.fillStyle = grad;
   ctx.fill();
 
@@ -204,7 +205,7 @@ export function drawFloatingSongCard(
   const cx = pad + 6;
   const cy = pad + 4;
   makeRoundRect(ctx, cx, cy, coverSize, coverSize, 26);
-  ctx.fillStyle = `rgba(255,255,255,${(0.01 + cardBgOpacity * 0.06).toFixed(3)})`;
+  ctx.fillStyle = 'rgba(255,255,255,0.04)';
   ctx.fill();
   if (item.coverUrl) {
     const rec = coverCache.get(item.coverUrl);
@@ -276,6 +277,12 @@ export function drawFloatingSongCard(
       cursorX += w + gap;
       if (cursorX > W - pad - 52) break;
     }
+  }
+
+  if (dofBlur > 0.12) {
+    makeRoundRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 32);
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.28, dofBlur * 0.18).toFixed(3)})`;
+    ctx.fill();
   }
 
   return regions;

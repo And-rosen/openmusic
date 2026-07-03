@@ -2,11 +2,16 @@ import { useEffect, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import {
   applyParticleSpinDrag,
-  setGalaxyPointerField,
   particlePointerSpin,
   particleSpin,
   resetParticleRotationTarget,
 } from './lib/galaxyGestureRotation';
+import {
+  clearGalaxyParticlePointer,
+  deactivateGalaxyParticlePointer,
+  isGalaxyPointerOverUi,
+  queueGalaxyParticlePointer,
+} from './lib/galaxyParticlePointer';
 import {
   galaxyOrbitRef,
   recenterGalaxyOrbit,
@@ -36,6 +41,7 @@ export default function GalaxyOrbitControls({ preset }: Props) {
 
     const beginDrag = (e: PointerEvent) => {
       if (e.button === 2) return;
+      if (isGalaxyPointerOverUi(e.clientX, e.clientY)) return;
       orbit.rotating = true;
       orbit.last.x = e.clientX;
       orbit.last.y = e.clientY;
@@ -49,40 +55,35 @@ export default function GalaxyOrbitControls({ preset }: Props) {
       unlockGalaxyOrbitCenter(orbit);
     };
 
-    const updatePointerField = (e: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const nx = (e.clientX - rect.left) / rect.width;
-      const ny = (e.clientY - rect.top) / rect.height;
-      const worldX = (nx - 0.5) * 5.0;
-      const worldY = (0.5 - ny) * 3.2;
-      setGalaxyPointerField(true, worldX, worldY);
-    };
-
     const onPointerMove = (e: PointerEvent) => {
-      updatePointerField(e);
-      if (!orbit.rotating) return;
-      const dx = e.clientX - orbit.last.x;
-      const dy = e.clientY - orbit.last.y;
-      if (particlePointerSpin.active) {
-        const nowSpin = performance.now();
-        const spinDt = Math.max(
-          1 / 120,
-          Math.min(0.08, (nowSpin - particlePointerSpin.lastT) / 1000 || 1 / 60),
-        );
-        applyParticleSpinDrag(dx, dy, spinDt);
-        particlePointerSpin.lastX = e.clientX;
-        particlePointerSpin.lastY = e.clientY;
-        particlePointerSpin.lastT = nowSpin;
+      if (isGalaxyPointerOverUi(e.clientX, e.clientY) && !orbit.rotating) {
+        deactivateGalaxyParticlePointer();
+        return;
       }
-      orbit.last.x = e.clientX;
-      orbit.last.y = e.clientY;
-      const totalDx = e.clientX - mouseDownAt.current.x;
-      const totalDy = e.clientY - mouseDownAt.current.y;
-      if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > CLICK_THRESHOLD) {
-        mouseDownAt.current.hadDrag = true;
+      if (orbit.rotating) {
+        const dx = e.clientX - orbit.last.x;
+        const dy = e.clientY - orbit.last.y;
+        if (particlePointerSpin.active) {
+          const nowSpin = performance.now();
+          const spinDt = Math.max(
+            1 / 120,
+            Math.min(0.08, (nowSpin - particlePointerSpin.lastT) / 1000 || 1 / 60),
+          );
+          applyParticleSpinDrag(dx, dy, spinDt);
+          particlePointerSpin.lastX = e.clientX;
+          particlePointerSpin.lastY = e.clientY;
+          particlePointerSpin.lastT = nowSpin;
+        }
+        orbit.last.x = e.clientX;
+        orbit.last.y = e.clientY;
+        const totalDx = e.clientX - mouseDownAt.current.x;
+        const totalDy = e.clientY - mouseDownAt.current.y;
+        if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > CLICK_THRESHOLD) {
+          mouseDownAt.current.hadDrag = true;
+        }
+        if (orbit.recentering) orbit.recentering = false;
       }
-      if (orbit.recentering) orbit.recentering = false;
+      queueGalaxyParticlePointer(e.clientX, e.clientY, canvas);
     };
 
     const endDrag = () => {
@@ -92,7 +93,7 @@ export default function GalaxyOrbitControls({ preset }: Props) {
 
     const onPointerLeave = () => {
       endDrag();
-      setGalaxyPointerField(false, -999, -999);
+      clearGalaxyParticlePointer();
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -108,7 +109,6 @@ export default function GalaxyOrbitControls({ preset }: Props) {
     };
 
     canvas.addEventListener('pointerdown', beginDrag);
-    canvas.addEventListener('pointermove', updatePointerField);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', endDrag);
     canvas.addEventListener('pointerleave', onPointerLeave);
@@ -117,7 +117,6 @@ export default function GalaxyOrbitControls({ preset }: Props) {
 
     return () => {
       canvas.removeEventListener('pointerdown', beginDrag);
-      canvas.removeEventListener('pointermove', updatePointerField);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', endDrag);
       canvas.removeEventListener('pointerleave', onPointerLeave);

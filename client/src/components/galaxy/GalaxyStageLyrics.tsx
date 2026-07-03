@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { getActiveLyricPair } from '../../api/music';
 import { useSmoothPlaybackTime } from '../../hooks/useSmoothPlaybackTime';
 import { useTrackLyrics } from '../../hooks/useTrackLyrics';
-import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
+import { roomVisualFxLive, subscribeRoomVisualFx } from '../../lib/roomVisualFxLive';
+import { subscribeStageLyricPalette } from '../../lib/stageLyricPaletteLive';
 import { useRoomStore } from '../../stores/roomStore';
 import { getGalaxyBeatCameraKick } from './lib/galaxyCinema';
 import { getCachedGalaxyAudioBands, resumeGalaxyAudioContext } from './lib/galaxyAudio';
@@ -11,6 +12,7 @@ import {
   buildLyricMaskAsset,
   buildLyricMesh,
   createStageLyricRoot,
+  applyLyricPaletteToMesh,
   disposeLyricMesh,
   disposeStageLyricRoot,
   type LyricMeshGroup,
@@ -37,6 +39,10 @@ export default function GalaxyStageLyrics({ isPlaying }: Props) {
   const currentMeshRef = useRef<LyricMeshGroup | null>(null);
   const runtimeRef = useRef(createStageLyricsRuntime());
   const prevLineRef = useRef<string | null>(null);
+  const [fxRevision, setFxRevision] = useState(0);
+
+  useEffect(() => subscribeRoomVisualFx(() => setFxRevision((v) => v + 1)), []);
+  useEffect(() => subscribeStageLyricPalette(() => setFxRevision((v) => v + 1)), []);
 
   const stageRoot = useMemo(() => {
     const root = createStageLyricRoot();
@@ -48,7 +54,12 @@ export default function GalaxyStageLyrics({ isPlaying }: Props) {
     if (!currentLine) return null;
     const mask = buildLyricMaskAsset(currentLine);
     return buildLyricMesh(mask);
-  }, [currentLine]);
+  }, [currentLine, fxRevision]);
+
+  useEffect(() => {
+    const mesh = currentMeshRef.current;
+    if (mesh) applyLyricPaletteToMesh(mesh);
+  }, [fxRevision, lyricMesh]);
 
   useEffect(() => {
     const root = stageRootRef.current;

@@ -13,7 +13,12 @@ async function metingFetch<T>(server: MusicSource, params: Record<string, string
 
 async function metingText(server: MusicSource, params: Record<string, string>): Promise<string> {
   const query = new URLSearchParams({ server, ...params });
-  const res = await fetchWithTimeout(`${API_BASE}?${query}`);
+  const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'manual' });
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get('Location') || res.headers.get('location') || '';
+    if (location) return location;
+  }
+  if (!res.ok) throw new Error('API 请求失败');
   return res.text();
 }
 
@@ -79,11 +84,18 @@ function createMetingProvider(
       if (song.url?.startsWith('http')) return song.url;
       const query = new URLSearchParams({ server: song.source, type: 'url', id: song.id });
       if (quality) query.set('quality', quality);
-      const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'follow' });
-      const text = await res.text();
+      const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'manual' });
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('Location') || res.headers.get('location') || '';
+        const trimmed = location.trim();
+        if (trimmed.startsWith('@')) return trimmed.slice(1);
+        if (trimmed.startsWith('http')) return trimmed;
+      }
+      if (!res.ok) throw new Error('API 请求失败');
+      const text = (await res.text()).trim();
       if (text.startsWith('@')) return text.slice(1);
       if (text.startsWith('http')) return text;
-      return res.url;
+      throw new Error('empty url');
     },
     async getLyrics(song) {
       if (song.lrc?.startsWith('[')) return song.lrc;

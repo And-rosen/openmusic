@@ -3,11 +3,13 @@ import { ChevronLeft, ListMusic, MessageCircle, Search, SlidersHorizontal, X } f
 
 type PanelId = 'search' | 'queue' | 'chat';
 
-const CLOSE_DELAY_MS = 320;
+/** Mineradio PEEK_HIDE_DELAY ≈ 170ms */
+const CLOSE_DELAY_MS = 120;
+const CLOSE_DELAY_FAST_MS = 50;
+const PANEL_EXIT_PAD = 24;
 const EDGE_SIZE = 14;
 const BOTTOM_BAR_CLOSE_DELAY_MS = 420;
 const FX_FAB_PEEK_DELAY_MS = 1100;
-const EDGE_CLOSE_DELAY_MS = 280;
 
 interface Props {
   onExit: () => void;
@@ -75,6 +77,15 @@ export default function RoomImmersiveShell({
   const fxFabPeekTimerRef = useRef<number | null>(null);
   const panelHoverRef = useRef(false);
   const edgeHoverRef = useRef(false);
+  const lastPointerRef = useRef({ x: -1, y: -1 });
+  const openPanelRef = useRef<PanelId | null>(null);
+  const searchPanelRef = useRef<HTMLDivElement>(null);
+  const queuePanelRef = useRef<HTMLDivElement>(null);
+  const chatPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    openPanelRef.current = openPanel;
+  }, [openPanel]);
 
   const cancelBottomBarClose = useCallback(() => {
     if (bottomBarCloseTimerRef.current !== null) {
@@ -124,27 +135,55 @@ export default function RoomImmersiveShell({
     }
   }, []);
 
+  const isPointInRect = useCallback((x: number, y: number, rect: DOMRect | undefined | null, pad = 0) => {
+    if (!rect) return false;
+    return x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad;
+  }, []);
 
-  const scheduleClose = useCallback(() => {
-    if (panelHoverRef.current || edgeHoverRef.current) return;
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(() => {
-      if (panelHoverRef.current || edgeHoverRef.current) return;
-      setOpenPanel(null);
-      closeTimerRef.current = null;
-    }, CLOSE_DELAY_MS);
-  }, [cancelClose]);
+  const shouldKeepPanelOpen = useCallback(
+    (panel: PanelId | null, x: number, y: number) => {
+      if (!panel) return false;
+      const panelRef =
+        panel === 'search' ? searchPanelRef : panel === 'queue' ? queuePanelRef : chatPanelRef;
+      return isPointInRect(x, y, panelRef.current?.getBoundingClientRect(), 4);
+    },
+    [isPointInRect],
+  );
+
+  const shouldClosePanelFromPointer = useCallback(
+    (panel: PanelId | null, x: number, y: number) => {
+      if (!panel) return true;
+      const panelRef =
+        panel === 'search' ? searchPanelRef : panel === 'queue' ? queuePanelRef : chatPanelRef;
+      const rect = panelRef.current?.getBoundingClientRect();
+      if (!rect) return true;
+      if (panel === 'queue') return x > rect.right + PANEL_EXIT_PAD;
+      if (panel === 'chat') return x < rect.left - PANEL_EXIT_PAD;
+      return y > rect.bottom + 20;
+    },
+    [],
+  );
+
+  const scheduleClose = useCallback(
+    (fast = false) => {
+      cancelClose();
+      closeTimerRef.current = window.setTimeout(() => {
+        const panel = openPanelRef.current;
+        const { x, y } = lastPointerRef.current;
+        if (panel && shouldKeepPanelOpen(panel, x, y)) return;
+        setOpenPanel(null);
+        panelHoverRef.current = false;
+        edgeHoverRef.current = false;
+        closeTimerRef.current = null;
+      }, fast ? CLOSE_DELAY_FAST_MS : CLOSE_DELAY_MS);
+    },
+    [cancelClose, shouldKeepPanelOpen],
+  );
 
   const scheduleCloseFromEdge = useCallback(() => {
     edgeHoverRef.current = false;
-    if (panelHoverRef.current) return;
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(() => {
-      if (panelHoverRef.current || edgeHoverRef.current) return;
-      setOpenPanel(null);
-      closeTimerRef.current = null;
-    }, EDGE_CLOSE_DELAY_MS);
-  }, [cancelClose]);
+    scheduleClose(true);
+  }, [scheduleClose]);
 
   const openFromEdge = useCallback(
     (panel: PanelId) => {
@@ -155,15 +194,42 @@ export default function RoomImmersiveShell({
     [cancelClose],
   );
 
+  const syncPanelOpenFromPointer = useCallback(
+    (x: number, y: number) => {
+      lastPointerRef.current = { x, y };
+      const panel = openPanelRef.current;
+      if (!panel || settingsOpen) return;
+      const keepOpen = shouldKeepPanelOpen(panel, x, y);
+      panelHoverRef.current = keepOpen;
+      if (keepOpen) {
+        cancelClose();
+        return;
+      }
+      const fast = shouldClosePanelFromPointer(panel, x, y);
+      // 明显离开面板区域：立即重设短倒计时；贴近边缘时避免每次移动都推迟收起
+      if (fast || closeTimerRef.current === null) {
+        scheduleClose(fast);
+      }
+    },
+    [cancelClose, scheduleClose, settingsOpen, shouldClosePanelFromPointer, shouldKeepPanelOpen],
+  );
+
   const handlePanelEnter = useCallback(() => {
     panelHoverRef.current = true;
+    edgeHoverRef.current = false;
     cancelClose();
   }, [cancelClose]);
 
-  const handlePanelLeave = useCallback(() => {
-    panelHoverRef.current = false;
-    scheduleClose();
-  }, [scheduleClose]);
+  const handlePanelLeave = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      panelHoverRef.current = false;
+      const panel = openPanelRef.current;
+      if (!panel) return;
+      scheduleClose(shouldClosePanelFromPointer(panel, e.clientX, e.clientY));
+    },
+    [scheduleClose, shouldClosePanelFromPointer],
+  );
 
   useEffect(
     () => () => {
@@ -181,20 +247,11 @@ export default function RoomImmersiveShell({
   useEffect(() => {
     if (!openPanel || settingsOpen) return;
     const onPointerMove = (e: PointerEvent) => {
-      if (panelHoverRef.current || edgeHoverRef.current) return;
-      const x = e.clientX;
-      const y = e.clientY;
-      const inTop = y <= EDGE_SIZE;
-      const inLeft = x <= EDGE_SIZE;
-      const inRight = x >= window.innerWidth - EDGE_SIZE && y <= window.innerHeight - 112;
-      const inBottom = y >= window.innerHeight - 28;
-      if (!inTop && !inLeft && !inRight && !inBottom) {
-        scheduleClose();
-      }
+      syncPanelOpenFromPointer(e.clientX, e.clientY);
     };
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => window.removeEventListener('pointermove', onPointerMove);
-  }, [openPanel, scheduleClose, settingsOpen]);
+  }, [openPanel, settingsOpen, syncPanelOpenFromPointer]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -315,13 +372,14 @@ export default function RoomImmersiveShell({
       </button>
 
       <div
-        className={`pointer-events-auto fixed left-1/2 top-4 z-[70] w-[min(620px,calc(100vw-56px))] -translate-x-1/2 transition-transform duration-[280ms] ease-[cubic-bezier(0.2,0.7,0.2,1)] ${
+        ref={searchPanelRef}
+        className={`fixed left-1/2 top-4 z-[70] w-[min(620px,calc(100vw-56px))] -translate-x-1/2 transition-transform duration-[280ms] ease-[cubic-bezier(0.2,0.7,0.2,1)] ${
           openPanel === 'search'
-            ? 'translate-y-0'
-            : '-translate-y-[calc(100%+1.5rem)]'
+            ? 'pointer-events-auto translate-y-0'
+            : 'pointer-events-none -translate-y-[calc(100%+1.5rem)]'
         }`}
-        onMouseEnter={handlePanelEnter}
-        onMouseLeave={handlePanelLeave}
+        onPointerEnter={handlePanelEnter}
+        onPointerLeave={handlePanelLeave}
       >
         <div
           className={`mineradio-glass-panel flex flex-col overflow-hidden rounded-[24px] p-3 ${
@@ -339,11 +397,14 @@ export default function RoomImmersiveShell({
       </div>
 
       <div
-        className={`pointer-events-auto fixed left-0 top-0 z-[68] h-full w-[min(380px,calc(100vw-48px))] transition-transform duration-[380ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          openPanel === 'queue' ? 'translate-x-0' : '-translate-x-full'
+        ref={queuePanelRef}
+        className={`fixed left-0 top-0 z-[68] h-full w-[min(380px,calc(100vw-48px))] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          openPanel === 'queue'
+            ? 'pointer-events-auto translate-x-0'
+            : 'pointer-events-none -translate-x-full'
         }`}
-        onMouseEnter={handlePanelEnter}
-        onMouseLeave={handlePanelLeave}
+        onPointerEnter={handlePanelEnter}
+        onPointerLeave={handlePanelLeave}
       >
         <div className="mineradio-glass-panel m-3 flex h-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[22px]">
           <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
@@ -362,11 +423,14 @@ export default function RoomImmersiveShell({
       </div>
 
       <div
-        className={`pointer-events-auto fixed right-0 top-0 z-[68] h-full w-[min(380px,calc(100vw-48px))] transition-transform duration-[380ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          openPanel === 'chat' && !settingsOpen ? 'translate-x-0' : 'translate-x-full'
+        ref={chatPanelRef}
+        className={`fixed right-0 top-0 z-[68] h-full w-[min(380px,calc(100vw-48px))] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          openPanel === 'chat' && !settingsOpen
+            ? 'pointer-events-auto translate-x-0'
+            : 'pointer-events-none translate-x-full'
         }`}
-        onMouseEnter={handlePanelEnter}
-        onMouseLeave={handlePanelLeave}
+        onPointerEnter={handlePanelEnter}
+        onPointerLeave={handlePanelLeave}
       >
         <div className="mineradio-glass-panel m-3 flex h-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[22px]">
           <div className="min-h-0 flex-1 overflow-hidden">{chatContent}</div>
