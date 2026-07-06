@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { memo, useRef, useCallback, useState, useEffect } from 'react';
 
 interface Props {
   progress: number;
@@ -13,7 +13,7 @@ interface Props {
   variant?: 'default' | 'mineradio';
 }
 
-export default function ProgressBar({
+function ProgressBar({
   progress,
   duration,
   onSeek,
@@ -52,6 +52,7 @@ export default function ProgressBar({
   };
 
   useEffect(() => {
+    if (disabled) return;
     const onMove = (e: PointerEvent) => {
       if (!dragging.current) return;
       setDragProgress(calcRatio(e.clientX) * 100);
@@ -75,7 +76,7 @@ export default function ProgressBar({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [calcRatio, clearReleaseTimer, duration, onSeek]);
+  }, [calcRatio, clearReleaseTimer, disabled, duration, onSeek]);
 
   useEffect(() => {
     if (dragging.current || dragProgress == null) return;
@@ -88,6 +89,7 @@ export default function ProgressBar({
 
   const displayProgress = Math.max(0, Math.min(100, dragProgress ?? progress));
   const draggingActive = dragProgress !== null;
+  const scale = displayProgress / 100;
 
   if (variant === 'mineradio') {
     return (
@@ -109,12 +111,12 @@ export default function ProgressBar({
   return (
     <div
       ref={barRef}
-      className={`relative rounded-full touch-none select-none ${disabled ? 'cursor-default' : 'cursor-pointer'} ${trackClassName} ${className}`}
+      className={`relative rounded-full touch-none select-none overflow-hidden ${disabled ? 'cursor-default' : 'cursor-pointer'} ${trackClassName} ${className}`}
       onPointerDown={handlePointerDown}
     >
       <div
-        className={`h-full rounded-full relative ${fillClassName}`}
-        style={{ width: `${displayProgress}%` }}
+        className={`h-full w-full origin-left rounded-full relative ${fillClassName}`}
+        style={{ transform: `scaleX(${scale})` }}
       >
         {showThumb && (
           <div className={`absolute right-0 top-1/2 -translate-y-1/2 bg-white rounded-full shadow opacity-100 ${thumbClassName}`} />
@@ -123,3 +125,5 @@ export default function ProgressBar({
     </div>
   );
 }
+
+export default memo(ProgressBar);

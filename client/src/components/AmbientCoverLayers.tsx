@@ -43,7 +43,7 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
         className="absolute inset-0 h-full w-full object-cover saturate-110 transition-[opacity,filter] duration-700"
         style={{
           opacity: loaded ? tuning.coverOpacity : 0,
-          filter: `blur(40px) brightness(${tuning.imgBrightness})`,
+          filter: `blur(28px) brightness(${tuning.imgBrightness})`,
           transform: 'scale(1.05)',
         }}
         onLoad={() => setLoaded(true)}

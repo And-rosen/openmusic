@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 
 import {
   ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check,
@@ -10,16 +10,15 @@ import { useAudioStore } from '../stores/audioStore';
 
 import { useSocket } from '../hooks/useSocket';
 
-import { formatDuration, getCoverUrl } from '../api/music';
-import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
-import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
+import { getCoverUrl } from '../api/music';
 import { useTrackLyrics } from '../hooks/useTrackLyrics';
 
-import Lyrics from './Lyrics';
+import SyncedLyricsPane from './playback/SyncedLyricsPane';
 import VinylPlayer from './VinylPlayer';
 import SongInfoPanel from './SongInfoPanel';
 
-import ProgressBar from './ProgressBar';
+import PlaybackProgressBar from './playback/PlaybackProgressBar';
+import PlaybackTimeLabel from './playback/PlaybackTimeLabel';
 import Tooltip from './Tooltip';
 import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
@@ -35,7 +34,7 @@ interface Props {
 
 
 
-export default function PlayerPage({ onClose }: Props) {
+export default memo(function PlayerPage({ onClose }: Props) {
 
   const { roomId } = useParams();
   const [tvCopied, setTvCopied] = useState(false);
@@ -59,12 +58,6 @@ export default function PlayerPage({ onClose }: Props) {
   const lyrics = useTrackLyrics(current);
 
   const isPlaying = room?.isPlaying ?? false;
-
-  const currentTime = useSmoothPlaybackTime();
-
-  const duration = useTrackDuration(current ?? null);
-  const displayTime = clampPlaybackTime(currentTime, duration);
-  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
 
   const hasPendingSkip = room?.skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
 
@@ -181,20 +174,12 @@ export default function PlayerPage({ onClose }: Props) {
             size="large"
           />
 
-          <Lyrics
-
+          <SyncedLyricsPane
             lines={lyrics}
-
-            currentTime={displayTime}
-
             onSeek={canControlPlayback ? handleSeek : undefined}
-
             variant="side"
-
             size="large"
-
             scrollable
-
           />
 
         </div>
@@ -206,39 +191,21 @@ export default function PlayerPage({ onClose }: Props) {
       <footer className="relative z-10 px-4 pt-2 sm:px-6 sm:pt-3 flex-shrink-0 2xl:px-12 2xl:pt-6 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] 2xl:pb-[max(3rem,env(safe-area-inset-bottom,0px))]">
 
         <div className="mb-1.5 sm:mb-2 flex justify-between text-xs sm:text-sm 2xl:text-xl text-white/50">
-
-          <span>{formatDuration(displayTime)}</span>
-
-          <span>{duration > 0 ? formatDuration(duration) : '--:--'}</span>
-
+          <PlaybackTimeLabel song={current} mode="elapsed" />
+          <PlaybackTimeLabel song={current} mode="duration" />
         </div>
 
-
-
         <div className="mb-2 sm:mb-4 py-1 sm:py-2 -my-1 sm:-my-2 2xl:mb-8">
-
-          <ProgressBar
-
-            progress={progress}
-
-            duration={duration}
-
+          <PlaybackProgressBar
+            song={current}
             onSeek={handleSeek}
-
             disabled={!canControlPlayback}
-
             className="h-1.5 2xl:h-2.5"
-
             trackClassName="bg-white/20"
-
             fillClassName="bg-white"
-
             thumbClassName="w-3 h-3 2xl:w-5 2xl:h-5"
-
             showThumb
-
           />
-
         </div>
 
         <div className="flex items-center justify-center gap-8 sm:gap-10 2xl:gap-16">
@@ -319,6 +286,6 @@ export default function PlayerPage({ onClose }: Props) {
 
   );
 
-}
+});
 
 

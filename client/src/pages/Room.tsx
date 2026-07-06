@@ -84,6 +84,7 @@ import Tooltip from '../components/Tooltip';
 import RoleBadge from '../components/RoleBadge';
 import { copyToClipboard } from '../lib/copyToClipboard';
 import { rememberRoomVisit } from '../lib/recentRooms';
+import { ensureRoomChromeInit } from '../lib/roomChromeInit';
 import { buildRoomShareText } from '../lib/roomShare';
 import {
   getStoredRoomPassword,
@@ -223,7 +224,16 @@ export default function Room() {
     || (!ignoreUrlPassword ? urlPassword : undefined)
     || getStoredRoomPassword(roomId);
 
-  const { room, nickname, showPlayer, setShowPlayer, isOwner, isAdmin, canControlPlayback, mySocketId, exitReason, isReconnecting } = useRoomStore();
+  const room = useRoomStore((s) => s.room);
+  const nickname = useRoomStore((s) => s.nickname);
+  const showPlayer = useRoomStore((s) => s.showPlayer);
+  const setShowPlayer = useRoomStore((s) => s.setShowPlayer);
+  const isOwner = useRoomStore((s) => s.isOwner);
+  const isAdmin = useRoomStore((s) => s.isAdmin);
+  const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
+  const mySocketId = useRoomStore((s) => s.mySocketId);
+  const exitReason = useRoomStore((s) => s.exitReason);
+  const isReconnecting = useRoomStore((s) => s.isReconnecting);
 
   const pureMode = usePureModeStore((s) => s.enabled);
   const setPureModeEnabled = usePureModeStore((s) => s.setEnabled);
@@ -295,6 +305,7 @@ export default function Room() {
   const [visualFxOpen, setVisualFxOpen] = useState(false);
   const [visualFxDragging, setVisualFxDragging] = useState(false);
   const isLgUp = useMediaQuery('(min-width: 1024px)');
+  const isSmUp = useMediaQuery('(min-width: 640px)');
   const showImmersiveEntry = isLgUp && !isMobileDevice() && !pureMode;
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [songHistoryOpen, setSongHistoryOpen] = useState(false);
@@ -324,6 +335,10 @@ export default function Room() {
   const lastSongRequestAtRef = useRef(0);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
+
+  useEffect(() => {
+    ensureRoomChromeInit();
+  }, []);
 
   useEffect(() => {
     if (!songHistoryOpen || !room?.id) return;
@@ -937,7 +952,7 @@ export default function Room() {
     setListPageSongs([]);
   }, [playlistSearchBackup, clearSearchResults, isLgUp]);
 
-  const handleAdd = async (song: SearchResult) => {
+  const handleAdd = useCallback(async (song: SearchResult) => {
     if (songRequestBlockReason) {
       showToast(songRequestBlockReason, 'error');
       return;
@@ -963,7 +978,7 @@ export default function Room() {
     } else if (res.error) {
       showToast(res.error, 'error');
     }
-  };
+  }, [songRequestBlockReason, addSong, showToast]);
 
   const handleListPageResultsChange = useCallback((songs: SearchResult[]) => {
     setListPageSongs(songs);
@@ -2096,16 +2111,14 @@ export default function Room() {
 
             </div>
 
-            {!pureMode && (
-            <div className="sm:hidden flex-shrink-0">
-
+            {!pureMode && room && !isSmUp && (
+            <div className="flex-shrink-0">
               <OnlineUsers
                 users={room.users}
                 creatorId={room.creatorId}
                 memberTiers={room.memberTiers}
                 onNotice={showToast}
               />
-
             </div>
             )}
 
@@ -2173,17 +2186,13 @@ export default function Room() {
 
             </div>
 
-            {!pureMode && (
-            <div className="hidden sm:block">
-
+            {!pureMode && room && isSmUp && (
               <OnlineUsers
                 users={room.users}
                 creatorId={room.creatorId}
                 memberTiers={room.memberTiers}
                 onNotice={showToast}
               />
-
-            </div>
             )}
 
           </div>
@@ -2259,10 +2268,11 @@ export default function Room() {
               </div>
             </div>
 
-            {/* 桌面：播放队列撑满剩余高度 */}
-            <div className="hidden lg:flex flex-1 min-h-0 flex-col mt-1">
+            {isLgUp && !pureMode && (
+            <div className="flex-1 min-h-0 flex-col mt-1 flex">
               {renderQueueSection(true)}
             </div>
+            )}
 
             {pureMode && !isLgUp && (
               <div className="mt-3 flex-shrink-0">
@@ -2274,8 +2284,8 @@ export default function Room() {
           {/* 右侧：聊天室（纯净模式桌面走滑入抽屉，手机内联展示） */}
           {(!pureMode || !isLgUp) && (
           <div className="order-2 flex min-h-0 min-w-0 flex-col gap-3 lg:h-full lg:min-h-0">
-            {!pureMode && (
-            <div className="lg:hidden">
+            {!pureMode && !isLgUp && (
+            <div>
               {renderQueueSection()}
             </div>
             )}

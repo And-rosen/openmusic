@@ -154,6 +154,23 @@ function printSnapshot(reason = 'tick'): void {
   console.groupEnd();
 }
 
+/** URL ?debug=1 或 ?om_debug=1 自动开启（并从地址栏移除参数） */
+function consumeDebugUrlParam(): boolean {
+  try {
+    const params = new URLSearchParams(location.search);
+    const enabled = params.get('debug') === '1' || params.get('om_debug') === '1';
+    if (!enabled) return false;
+    params.delete('debug');
+    params.delete('om_debug');
+    const query = params.toString();
+    const next = `${location.pathname}${query ? `?${query}` : ''}${location.hash}`;
+    history.replaceState(null, '', next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function setDebugSocketProvider(provider: () => SocketSnapshot | null): void {
   state.getSocket = provider;
 }
@@ -216,5 +233,7 @@ export function installOpenMusicDebug(): void {
   }));
   window.addEventListener('unhandledrejection', (event) => debugLog('unhandled-rejection', String(event.reason)));
 
-  if (localStorage.getItem(DEBUG_FLAG_KEY) === '1') enableOpenMusicDebug();
+  if (localStorage.getItem(DEBUG_FLAG_KEY) === '1' || consumeDebugUrlParam()) {
+    enableOpenMusicDebug();
+  }
 }

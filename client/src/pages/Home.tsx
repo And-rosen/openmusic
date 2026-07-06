@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Music, Users, Radio, ArrowRight, Lock, ListMusic,
@@ -11,6 +11,7 @@ import type { RoomSummary } from '../types';
 import { createRandomNickname } from '../lib/randomNickname';
 import { usePageSeo } from '../lib/seo';
 import { partitionRoomsByRecent } from '../lib/recentRooms';
+import { areRoomListsEqual } from '../lib/roomListCompare';
 import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
 import Tooltip from '../components/Tooltip';
@@ -43,7 +44,7 @@ function PlayingBars() {
   );
 }
 
-function RoomCard({
+const RoomCard = memo(function RoomCard({
   room,
   onJoin,
   isRecent,
@@ -136,7 +137,7 @@ function RoomCard({
       </div>
     </button>
   );
-}
+});
 
 function Modal({
   title,
@@ -174,7 +175,8 @@ function Modal({
 
 export default function Home() {
   const navigate = useNavigate();
-  const { nickname, setNickname } = useRoomStore();
+  const nickname = useRoomStore((s) => s.nickname);
+  const setNickname = useRoomStore((s) => s.setNickname);
   const { leaveRoom } = useSocket();
 
   usePageSeo({
@@ -201,7 +203,7 @@ export default function Home() {
     if (!silent) setRoomsLoading(true);
     try {
       const data = await listRooms();
-      setRooms(data);
+      setRooms((prev) => (areRoomListsEqual(prev, data) ? prev : data));
     } catch {
       if (!silent) setError('加载房间列表失败');
     } finally {
@@ -282,8 +284,12 @@ export default function Home() {
     }
   };
 
-  const handleRoomCardClick = (room: RoomSummary) => {
-    ensureNickname();
+  const handleRoomCardClick = useCallback((room: RoomSummary) => {
+    const trimmed = nickname.trim();
+    if (!trimmed) {
+      const generated = createRandomNickname();
+      setNickname(generated);
+    }
     setError('');
     if (room.isLocked && !room.hasPassword) {
       setError('房间已上锁，禁止进入');
@@ -293,9 +299,9 @@ export default function Home() {
       setPasswordTarget(room);
       setCardPassword('');
     } else {
-      goToRoom(room.id);
+      navigate(`/room/${room.id}`);
     }
-  };
+  }, [nickname, navigate, setNickname]);
 
   const handlePasswordJoin = () => {
     if (!passwordTarget) return;

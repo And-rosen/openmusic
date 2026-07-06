@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { memo, useId } from 'react';
 
 interface Props {
   coverUrl: string;
@@ -17,7 +17,7 @@ const HINGE_CX = 30;
 const HINGE_CY = 35;
 const ARM_PIVOT = `${(HINGE_CX / 140) * 100}% ${(HINGE_CY / 100) * 100}%`;
 
-export default function VinylPlayer({ coverUrl, isPlaying, className = '', size = 'default' }: Props) {
+function VinylPlayer({ coverUrl, isPlaying, className = '', size = 'default' }: Props) {
   const gradId = useId().replace(/:/g, '');
 
   return (
@@ -78,3 +78,5 @@ export default function VinylPlayer({ coverUrl, isPlaying, className = '', size 
     </div>
   );
 }
+
+export default memo(VinylPlayer);

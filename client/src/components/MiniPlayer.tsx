@@ -1,18 +1,16 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Play, Pause, SkipForward, ChevronUp, Loader2 } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 
-import { formatDuration, getActiveLyricPair } from '../api/music';
-import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
-import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
-import { useTrackLyrics } from '../hooks/useTrackLyrics';
-
 import SourceBadge from './SourceBadge';
 import SongCover from './SongCover';
 
 import ProgressBar from './ProgressBar';
+import PlaybackProgressBar from './playback/PlaybackProgressBar';
+import PlaybackTimeLabel from './playback/PlaybackTimeLabel';
+import MiniPlayerLyricTicker from './playback/MiniPlayerLyricTicker';
 import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 import Tooltip from './Tooltip';
@@ -26,7 +24,7 @@ interface Props {
 
 
 
-export default function MiniPlayer({
+export default memo(function MiniPlayer({
   onExpand,
   transparentBar = true,
   barClassName,
@@ -51,12 +49,6 @@ export default function MiniPlayer({
   const fmLoading = Boolean(room?.randomLoading && !current);
 
   const isPlaying = room?.isPlaying ?? false;
-  const currentTime = useSmoothPlaybackTime();
-  const duration = useTrackDuration(current);
-  const displayTime = clampPlaybackTime(currentTime, duration);
-  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
-  const lyrics = useTrackLyrics(current);
-  const { current: currentLyric, next: nextLyric } = getActiveLyricPair(lyrics, displayTime);
 
   const handlePlayPause = () => {
     if (!room) return;
@@ -138,11 +130,10 @@ export default function MiniPlayer({
             {skipMsg || skipError}
           </p>
         )}
-        <ProgressBar
-          progress={progress}
-          duration={duration}
+        <PlaybackProgressBar
+          song={current}
           onSeek={handleSeek}
-          disabled={!duration}
+          disabled={!current.duration}
           variant="mineradio"
         />
         <div className="mineradio-controls">
@@ -213,10 +204,10 @@ export default function MiniPlayer({
           </div>
 
           <div className="control-cluster modes">
-            <div className="mineradio-time-display">
-              {formatDuration(displayTime)}
-              {duration > 0 ? ` / ${formatDuration(duration)}` : ''}
-            </div>
+            <PlaybackTimeLabel
+              song={current}
+              className="mineradio-time-display"
+            />
           </div>
         </div>
       </div>
@@ -292,25 +283,14 @@ export default function MiniPlayer({
       )}
 
       <div className="py-1.5 -my-1.5">
-
-        <ProgressBar
-
-          progress={progress}
-
-          duration={duration}
-
+        <PlaybackProgressBar
+          song={current}
           onSeek={handleSeek}
-
           disabled={!canControlPlayback}
-
           className="h-0.5"
-
           trackClassName="bg-netease-border"
-
           fillClassName="bg-netease-red"
-
         />
-
       </div>
 
 
@@ -351,38 +331,14 @@ export default function MiniPlayer({
 
         </button>
 
-        <button
-          onClick={onExpand}
-          className="flex-1 min-w-0 text-center px-1 sm:px-2"
-        >
-          {currentLyric || nextLyric ? (
-            <>
-              <p className="text-xs sm:text-sm font-medium truncate leading-tight">
-                {currentLyric || '\u00A0'}
-              </p>
-              <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">
-                {nextLyric || '\u00A0'}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-xs sm:text-sm font-medium truncate leading-tight">{current.name}</p>
-              <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">
-                {current.artist}
-              </p>
-            </>
-          )}
-        </button>
+        <MiniPlayerLyricTicker song={current} onExpand={onExpand} />
 
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
 
-        <span className="text-[10px] text-netease-muted hidden sm:block">
-
-          {formatDuration(displayTime)}
-
-          {duration > 0 && ` / ${formatDuration(duration)}`}
-
-        </span>
+        <PlaybackTimeLabel
+          song={current}
+          className="text-[10px] text-netease-muted hidden sm:block"
+        />
 
 
 
@@ -442,6 +398,6 @@ export default function MiniPlayer({
 
   );
 
-}
+});
 
 

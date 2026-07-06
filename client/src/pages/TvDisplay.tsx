@@ -4,20 +4,20 @@ import { Loader2, Music2, Maximize } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
-import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
-import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import {
-  getLyrics, parseLrc, formatDuration, getCoverUrl,
+  getLyrics, parseLrc, getCoverUrl,
   getLrcFallbackDurationMs, getTrackKey,
 } from '../api/music';
 import type { LyricLine } from '../types';
-import Lyrics from '../components/Lyrics';
 import VinylPlayer from '../components/VinylPlayer';
 import SongInfoPanel from '../components/SongInfoPanel';
-import ProgressBar from '../components/ProgressBar';
+import SyncedLyricsPane from '../components/playback/SyncedLyricsPane';
+import TvCoverBackground from '../components/tv/TvCoverBackground';
+import TvProgressFooter from '../components/tv/TvProgressFooter';
 import AudioEngine from '../components/AudioEngine';
 import Tooltip from '../components/Tooltip';
 import { usePageSeo } from '../lib/seo';
+import { ensureTvChromeInit } from '../lib/roomChromeInit';
 import {
   getStoredRoomPassword,
   parseRoomPasswordFromSearch,
@@ -29,7 +29,10 @@ export default function TvDisplay() {
   const navigate = useNavigate();
   const location = useLocation();
   const room = useRoomStore((s) => s.room);
-  const { joinRoom, leaveRoom } = useSocket();
+  const current = room?.current ?? null;
+  const isPlaying = room?.isPlaying ?? false;
+  const queueLength = room?.queue.length ?? 0;
+  const { joinRoom } = useSocket();
   const setLrcDuration = useAudioStore((s) => s.setLrcDuration);
 
   const [joinError, setJoinError] = useState('');
@@ -37,6 +40,11 @@ export default function TvDisplay() {
   const [bgLoaded, setBgLoaded] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const bgProbeRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    ensureTvChromeInit();
+  }, []);
 
   usePageSeo({
     title: room?.name ? `${room.name} 电视歌词` : '电视歌词模式',
@@ -69,13 +77,6 @@ export default function TvDisplay() {
     }
   };
 
-  const current = room?.current;
-  const isPlaying = room?.isPlaying ?? false;
-  const currentTime = useSmoothPlaybackTime();
-  const duration = useTrackDuration(current ?? null);
-  const displayTime = clampPlaybackTime(currentTime, duration);
-  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
-
   useEffect(() => {
     if (!roomId) return;
     let cancelled = false;
@@ -98,7 +99,7 @@ export default function TvDisplay() {
       cancelled = true;
       if (redirectTimer) window.clearTimeout(redirectTimer);
     };
-  }, [roomId, location.search, joinRoom, leaveRoom, navigate]);
+  }, [roomId, location.search, joinRoom, navigate]);
 
   useEffect(() => {
     if (!current) {
@@ -126,6 +127,19 @@ export default function TvDisplay() {
       .catch(() => setLyrics([]));
   }, [current?.id, current?.source, current?.name, current?.lrc, current?.duration, setLrcDuration]);
 
+  useEffect(() => {
+    if (!current) return;
+    const img = bgProbeRef.current;
+    if (!img) return;
+    if (img.complete) {
+      setBgLoaded(true);
+      return;
+    }
+    const onLoad = () => setBgLoaded(true);
+    img.addEventListener('load', onLoad);
+    return () => img.removeEventListener('load', onLoad);
+  }, [current?.id, current?.source]);
+
   let content: React.ReactNode;
 
   if (joinError) {
@@ -150,8 +164,8 @@ export default function TvDisplay() {
           </div>
           <p className="text-base font-light text-white/50 mb-1">等待点播</p>
           <p className="text-xs text-white/25 text-center">
-            {room.queue.length > 0
-              ? `队列中有 ${room.queue.length} 首歌曲即将播放`
+            {queueLength > 0
+              ? `队列中有 ${queueLength} 首歌曲即将播放`
               : '在手机上搜索并点歌吧'}
           </p>
         </div>
@@ -161,15 +175,15 @@ export default function TvDisplay() {
     const coverUrl = getCoverUrl(current, 'medium');
     content = (
       <div className="fixed inset-0 z-50 flex flex-col animate-fade-in select-none">
-        <div
-          className="absolute inset-0 bg-cover bg-center transition-all duration-1000 scale-110"
-          style={{
-            backgroundImage: bgLoaded ? `url(${coverUrl})` : undefined,
-            filter: 'blur(60px) brightness(0.35)',
-          }}
+        <TvCoverBackground coverUrl={coverUrl} loaded={bgLoaded} />
+        <img
+          ref={bgProbeRef}
+          src={coverUrl}
+          alt=""
+          className="hidden"
+          loading="eager"
+          decoding="async"
         />
-        <img src={coverUrl} alt="" className="hidden" onLoad={() => setBgLoaded(true)} loading="eager" decoding="async" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/70" />
 
         <div className="relative z-10 flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0 px-4 lg:px-12 gap-4 lg:gap-10">
           <div className="flex-shrink-0 lg:flex-1 flex items-center justify-center py-2 lg:py-8">
@@ -184,31 +198,11 @@ export default function TvDisplay() {
               requestedBy={current.requestedBy}
               size="large"
             />
-            <Lyrics lines={lyrics} currentTime={displayTime} variant="side" size="large" />
+            <SyncedLyricsPane lines={lyrics} variant="side" size="large" instantScroll />
           </div>
         </div>
 
-        <footer className="relative z-10 px-8 pb-8 pt-3 flex-shrink-0">
-          <div className="mb-2 flex justify-between text-xs lg:text-sm text-white/50">
-            <span>{formatDuration(displayTime)}</span>
-            <span className="flex items-center gap-2">
-              {!isPlaying && <span className="text-amber-400/80">已暂停</span>}
-              {duration > 0 ? formatDuration(duration) : '--:--'}
-            </span>
-          </div>
-
-          <div className="py-2 -my-2">
-            <ProgressBar
-              progress={progress}
-              duration={duration}
-              onSeek={() => {}}
-              disabled
-              className="h-1"
-              trackClassName="bg-white/20"
-              fillClassName="bg-white"
-            />
-          </div>
-        </footer>
+        <TvProgressFooter song={current} isPlaying={isPlaying} />
       </div>
     );
   }

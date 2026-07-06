@@ -1,21 +1,21 @@
 /** 贵宾进房欢迎礼花 — 轻量 canvas，限定在指定容器内 */
-export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2800) {
+export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2600) {
   if (typeof document === 'undefined' || !container) return;
+  if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
   if (!ctx) return;
 
   const width = container.clientWidth;
   const height = container.clientHeight;
   if (width <= 0 || height <= 0) return;
 
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
-  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:20';
+  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:20;contain:strict';
   container.appendChild(canvas);
-  ctx.scale(dpr, dpr);
 
   const colors = ['#f6d365', '#fb7185', '#67e8f9', '#c4b5fd', '#6ee7b7', '#fbbf24', '#fda4af', '#fff'];
   const targetX = width * 0.5;
@@ -56,12 +56,13 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2800) {
     };
   };
 
-  const particles = Array.from({ length: 300 }, (_, index) =>
+  const particles = Array.from({ length: 130 }, (_, index) =>
     createParticle(index, index % 2 === 0 ? 'left' : 'right'),
   );
 
   const start = performance.now();
   let raf = 0;
+  const baseTransform = () => ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const roundRectPath = (x: number, y: number, w: number, h: number, r: number) => {
     if (typeof ctx.roundRect === 'function') {
@@ -75,17 +76,21 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2800) {
     p: (typeof particles)[number],
     alpha: number,
   ) => {
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(p.rot);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = p.color;
 
     if (p.kind === 'circle') {
       ctx.beginPath();
-      ctx.arc(0, 0, p.size * 0.45, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI * 2);
       ctx.fill();
-    } else if (p.kind === 'rect') {
+      return;
+    }
+
+    const cos = Math.cos(p.rot);
+    const sin = Math.sin(p.rot);
+    ctx.setTransform(cos * dpr, sin * dpr, -sin * dpr, cos * dpr, p.x * dpr, p.y * dpr);
+
+    if (p.kind === 'rect') {
       const w = p.size;
       const h = p.size * 0.55;
       ctx.beginPath();
@@ -99,13 +104,15 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2800) {
       ctx.fill();
     }
 
-    ctx.restore();
+    baseTransform();
   };
 
   const tick = (now: number) => {
     const elapsed = now - start;
+    baseTransform();
     ctx.clearRect(0, 0, width, height);
 
+    let visible = 0;
     for (const p of particles) {
       const localElapsed = elapsed - p.delay;
       if (localElapsed < 0) continue;
@@ -121,7 +128,14 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2800) {
       const alpha = (1 - life ** 1.6) * 0.95;
       if (alpha <= 0.02) continue;
 
+      visible += 1;
       drawParticle(p, alpha);
+    }
+
+    if (visible === 0 && elapsed > durationMs) {
+      cancelAnimationFrame(raf);
+      canvas.remove();
+      return;
     }
 
     if (elapsed < durationMs + 180) {

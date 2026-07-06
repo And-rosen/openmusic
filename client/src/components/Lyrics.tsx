@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { filterDisplayLyrics } from '../api/music';
+import { findActiveLyricIndex } from '../lib/lyricActiveIndex';
 import type { LyricLine } from '../types';
 
 interface Props {
@@ -11,34 +12,38 @@ interface Props {
   size?: 'default' | 'large';
   /** 全屏歌词：展示全部行并允许手动滚动 */
   scrollable?: boolean;
+  /** TV 等场景用 instant 滚动降低布局成本 */
+  instantScroll?: boolean;
 }
 
 const SIDE_WINDOW = 5;
 const SCROLL_IDLE_MS = 3000;
 
-export default function Lyrics({
+function Lyrics({
   lines,
   currentTime,
   onSeek,
   variant = 'center',
   size = 'default',
   scrollable = false,
+  instantScroll = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   const [manualScroll, setManualScroll] = useState(false);
   const scrollTimer = useRef<ReturnType<typeof setTimeout>>();
+  const lastActiveIndexRef = useRef(-1);
 
-  const displayLines = filterDisplayLyrics(lines);
+  const displayLines = useMemo(() => filterDisplayLyrics(lines), [lines]);
   const isSide = variant === 'side';
   const isLarge = size === 'large';
   const fullScroll = scrollable && isSide;
   const shouldAutoScroll = fullScroll || !isSide;
 
-  const activeIndex = displayLines.findIndex((line, i) => {
-    const next = displayLines[i + 1];
-    return currentTime >= line.time && (!next || currentTime < next.time);
-  });
+  const activeIndex = useMemo(
+    () => findActiveLyricIndex(displayLines, currentTime),
+    [displayLines, currentTime],
+  );
 
   const windowStart = fullScroll
     ? 0
@@ -72,12 +77,15 @@ export default function Lyrics({
 
   useEffect(() => {
     setManualScroll(false);
+    lastActiveIndexRef.current = -1;
   }, [lines]);
 
   useEffect(() => {
     if (!shouldAutoScroll || manualScroll || activeIndex < 0) return;
-    scrollActiveToCenter('smooth');
-  }, [activeIndex, manualScroll, shouldAutoScroll, scrollActiveToCenter]);
+    if (activeIndex === lastActiveIndexRef.current) return;
+    lastActiveIndexRef.current = activeIndex;
+    scrollActiveToCenter(instantScroll ? 'instant' : 'smooth');
+  }, [activeIndex, instantScroll, manualScroll, shouldAutoScroll, scrollActiveToCenter]);
 
   const handleScroll = () => {
     if (!shouldAutoScroll) return;
@@ -135,8 +143,8 @@ export default function Lyrics({
             <div
               key={`${line.time}-${realIndex}`}
               ref={isActive ? activeRef : undefined}
-              onClick={() => onSeek?.(line.time)}
-              className={`cursor-pointer ${
+              onClick={onSeek ? () => onSeek(line.time) : undefined}
+              className={`${onSeek ? 'cursor-pointer' : ''} ${
                 isActive || isPast ? 'transition-none' : 'transition-colors duration-150'
               } ${isSide ? 'text-left' : 'text-center'} ${
                 isActive
@@ -161,3 +169,5 @@ export default function Lyrics({
     </div>
   );
 }
+
+export default memo(Lyrics);

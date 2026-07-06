@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import SourceBadge from './SourceBadge';
 import type { MusicSource } from '../types';
 
@@ -9,7 +10,7 @@ interface Props {
   size?: 'default' | 'large';
 }
 
-export default function SongInfoPanel({
+function SongInfoPanel({
   name,
   artist,
   source = 'netease',
@@ -30,3 +31,5 @@ export default function SongInfoPanel({
     </div>
   );
 }
+
+export default memo(SongInfoPanel);

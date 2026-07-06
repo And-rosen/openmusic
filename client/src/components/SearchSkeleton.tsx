@@ -2,6 +2,8 @@ import { getStoredSongResultPageSize } from '../lib/songResultPagination';
 
 export const RESULT_BODY_HEIGHT = 'min(52vh, 480px)';
 
+const SHIMMER_ROW_CAP = 6;
+
 interface Props {
   count?: number;
   fillHeight?: boolean;
@@ -35,26 +37,30 @@ export default function SearchSkeleton({
       style={fillHeight ? undefined : { height: RESULT_BODY_HEIGHT }}
     >
       <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
-        {Array.from({ length: count }, (_, i) => (
+        {Array.from({ length: count }, (_, i) => {
+          const shimmer = i < SHIMMER_ROW_CAP;
+          const blockCls = shimmer ? 'skeleton-shimmer' : 'bg-white/5';
+          return (
           <div
             key={i}
             className="flex items-center gap-3 rounded-xl p-3"
-            style={{ animationDelay: `${i * 60}ms` }}
+            style={shimmer ? { animationDelay: `${i * 60}ms` } : undefined}
           >
-            <div className="h-12 w-12 flex-shrink-0 rounded-lg skeleton-shimmer" />
+            <div className={`h-12 w-12 flex-shrink-0 rounded-lg ${blockCls}`} />
             <div className="min-w-0 flex-1 space-y-2.5">
               <div
-                className="h-3.5 rounded-md skeleton-shimmer"
+                className={`h-3.5 rounded-md ${blockCls}`}
                 style={{ width: `${55 + (i % 3) * 12}%` }}
               />
               <div
-                className="h-3 rounded-md skeleton-shimmer"
+                className={`h-3 rounded-md ${blockCls}`}
                 style={{ width: `${35 + (i % 2) * 15}%` }}
               />
             </div>
-            <div className="h-5 w-10 flex-shrink-0 rounded-full skeleton-shimmer" />
+            <div className={`h-5 w-10 flex-shrink-0 rounded-full ${blockCls}`} />
           </div>
-        ))}
+          );
+        })}
       </div>
       {showPaginationFooter && <PaginationSkeleton />}
     </div>

@@ -24,7 +24,7 @@ import { VariableSizeList, type ListChildComponentProps, type ListOnScrollProps 
 
 const VIRTUAL_LIST_THRESHOLD = 24;
 /** 变高消息在 VariableSizeList 下滚动时会因行高重算而跳动，暂用原生列表 */
-const VIRTUAL_LIST_ENABLED = false;
+const VIRTUAL_LIST_ENABLED = true;
 const ROW_GAP_PX = 8;
 const ESTIMATED_ROW_HEIGHT = 64;
 
@@ -172,6 +172,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   const welcomeConfettiIdsRef = useRef(new Set<string>());
   const welcomeConfettiCooldownRef = useRef(new Map<string, number>());
   const welcomeConfettiSessionStartRef = useRef(Date.now());
+  const pendingWelcomeConfettiRef = useRef(false);
   const chatConfettiRootRef = useRef<HTMLDivElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<VariableSizeList>(null);
@@ -220,13 +221,31 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     el.scrollTo({ top: el.scrollHeight, behavior });
   }, [chatScrollRoot, messages.length, useVirtualList]);
 
+  const flushWelcomeConfetti = useCallback(() => {
+    if (pureMode || !pendingWelcomeConfettiRef.current) return;
+    if (!initialScrollDoneRef.current || pinningToBottomRef.current) return;
+
+    pendingWelcomeConfettiRef.current = false;
+    const container = chatConfettiRootRef.current;
+    if (!container) return;
+    fireWelcomeConfetti(container);
+  }, [pureMode]);
+
+  const scheduleWelcomeConfetti = useCallback(() => {
+    pendingWelcomeConfettiRef.current = true;
+    requestAnimationFrame(() => {
+      flushWelcomeConfetti();
+    });
+  }, [flushWelcomeConfetti]);
+
   const finishInitialScroll = useCallback(() => {
     initialScrollDoneRef.current = true;
     allowLoadOlderRef.current = true;
     stickToBottomRef.current = true;
     setShowLoadOlderHint(false);
     setShowScrollToBottom(false);
-  }, []);
+    flushWelcomeConfetti();
+  }, [flushWelcomeConfetti]);
 
   const pinToBottomUntilStable = useCallback(() => {
     let frames = 0;
@@ -273,6 +292,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
 
     const finish = () => {
       pinningToBottomRef.current = false;
+      flushWelcomeConfetti();
     };
 
     const step = () => {
@@ -307,7 +327,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
       cancelAnimationFrame(rafId);
       finish();
     };
-  }, [chatScrollRoot, scrollToBottomEnd]);
+  }, [chatScrollRoot, flushWelcomeConfetti, scrollToBottomEnd]);
 
   const setRowHeight = useCallback((index: number, messageId: string, height: number) => {
     const prev = rowHeightsRef.current.get(messageId);
@@ -343,6 +363,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     welcomeConfettiIdsRef.current.clear();
     welcomeConfettiCooldownRef.current.clear();
     welcomeConfettiSessionStartRef.current = Date.now();
+    pendingWelcomeConfettiRef.current = false;
     setRevealedPureImages(new Set());
     rowHeightsRef.current.clear();
     prevMessageCountRef.current = 0;
@@ -364,8 +385,6 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
 
   useEffect(() => {
     if (pureMode) return;
-    const container = chatConfettiRootRef.current;
-    if (!container) return;
 
     for (const msg of messages) {
       if (msg.kind !== 'welcome' || welcomeConfettiIdsRef.current.has(msg.id)) continue;
@@ -378,14 +397,9 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
       if (now - lastAt < WELCOME_CONFETTI_COOLDOWN_MS) continue;
 
       welcomeConfettiCooldownRef.current.set(targetId, now);
-      fireWelcomeConfetti(container);
-      if (stickToBottomRef.current) {
-        requestAnimationFrame(() => {
-          scrollToBottomEnd('instant');
-        });
-      }
+      scheduleWelcomeConfetti();
     }
-  }, [messages, pureMode, scrollToBottomEnd]);
+  }, [messages, pureMode, scheduleWelcomeConfetti]);
 
   useLayoutEffect(() => {
     if (reactionPickerOpenRef.current) return;

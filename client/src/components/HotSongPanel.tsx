@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { Flame, Plus, Loader2, TrendingUp } from 'lucide-react';
 import type { HotSongItem, SearchResult } from '../types';
 import { getHotSongs, songKey } from '../api/music';
@@ -31,7 +31,7 @@ const HOT_NAME_LINE_CLS =
 const HOT_ARTIST_LINE_CLS =
   'w-full min-w-0 line-clamp-2 break-words leading-snug min-h-[2.2em]';
 
-export default function HotSongPanel({
+export default memo(function HotSongPanel({
   addingId,
   onAdd,
   refreshKey = 0,
@@ -60,7 +60,10 @@ export default function HotSongPanel({
     };
 
     void loadHot();
-    const timer = window.setInterval(() => void loadHot(true), 30000);
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void loadHot(true);
+    }, 30000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -194,4 +197,4 @@ export default function HotSongPanel({
       </div>
     </div>
   );
-}
+});
