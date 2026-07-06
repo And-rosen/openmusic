@@ -4,7 +4,7 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2600) {
   if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+  const ctx = canvas.getContext('2d', { alpha: true });
   if (!ctx) return;
 
   const width = container.clientWidth;
@@ -14,12 +14,22 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2600) {
   const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
-  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:20;contain:strict';
+  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:20;background:transparent';
   container.appendChild(canvas);
+
+  const clearCanvas = () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  clearCanvas();
 
   const colors = ['#f6d365', '#fb7185', '#67e8f9', '#c4b5fd', '#6ee7b7', '#fbbf24', '#fda4af', '#fff'];
   const targetX = width * 0.5;
   const targetY = height * 0.20;
+  const edgePad = 6;
+  const launchFadeStartMs = 720;
+  const launchFadeDurationMs = 1100;
 
   type ParticleKind = 'circle' | 'rect' | 'ribbon';
   type Side = 'left' | 'right';
@@ -109,8 +119,7 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2600) {
 
   const tick = (now: number) => {
     const elapsed = now - start;
-    baseTransform();
-    ctx.clearRect(0, 0, width, height);
+    clearCanvas();
 
     let visible = 0;
     for (const p of particles) {
@@ -124,15 +133,27 @@ export function fireWelcomeConfetti(container: HTMLElement, durationMs = 2600) {
       p.vx *= p.drag;
       p.rot += p.vr;
 
-      const life = Math.min(1, localElapsed / durationMs);
-      const alpha = (1 - life ** 1.6) * 0.95;
+      if (p.x < edgePad) {
+        p.x = edgePad;
+        p.vx = Math.abs(p.vx) * 0.35;
+      } else if (p.x > width - edgePad) {
+        p.x = width - edgePad;
+        p.vx = -Math.abs(p.vx) * 0.35;
+      }
+
+      if (p.y > height + 16) continue;
+
+      const fadeElapsed = Math.max(0, localElapsed - launchFadeStartMs);
+      const alpha = fadeElapsed > 0
+        ? Math.max(0, 1 - (fadeElapsed / launchFadeDurationMs) ** 1.35) * 0.95
+        : 0.95;
       if (alpha <= 0.02) continue;
 
       visible += 1;
       drawParticle(p, alpha);
     }
 
-    if (visible === 0 && elapsed > durationMs) {
+    if (visible === 0) {
       cancelAnimationFrame(raf);
       canvas.remove();
       return;

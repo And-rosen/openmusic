@@ -14,6 +14,8 @@ import Tooltip from './Tooltip';
 interface Props {
   id: string;
   className?: string;
+  /** 悬停显示表情名；外层已有 Tooltip 时传 false */
+  tooltip?: boolean;
   /** P0：当前可见区域 */
   priority?: QFacePriority;
   /** P1：即将进入视野（rootMargin 预取） */
@@ -28,6 +30,7 @@ const NEAR_ROOT_MARGIN = '96px';
 export default function QFaceImage({
   id,
   className,
+  tooltip = true,
   priority = QFaceLoadPriority.PANEL,
   nearPriority = QFaceLoadPriority.NEAR,
   observeRoot = null,
@@ -73,24 +76,30 @@ export default function QFaceImage({
     };
   }, [id, nearPriority, observeRoot, priority]);
 
+  const faceContent = (
+    <span ref={anchorRef} className="inline-flex align-middle">
+      {decoded ? (
+        <img
+          src={getQQFaceUrl(id)}
+          alt={face.text}
+          className={className}
+          decoding="async"
+          onLoad={() => markQFaceImageRendered(id)}
+        />
+      ) : (
+        <span
+          className={placeholderClassName || className}
+          aria-hidden="true"
+        />
+      )}
+    </span>
+  );
+
+  if (!tooltip) return faceContent;
+
   return (
     <Tooltip content={face.text} side="bottom">
-      <span ref={anchorRef} className="inline-flex align-middle">
-        {decoded ? (
-          <img
-            src={getQQFaceUrl(id)}
-            alt={face.text}
-            className={className}
-            decoding="async"
-            onLoad={() => markQFaceImageRendered(id)}
-          />
-        ) : (
-          <span
-            className={placeholderClassName || className}
-            aria-hidden="true"
-          />
-        )}
-      </span>
+      {faceContent}
     </Tooltip>
   );
 }

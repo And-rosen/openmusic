@@ -39,6 +39,7 @@ function ReactionFaceButton({
       >
         <QFaceImage
           id={face.id}
+          tooltip={false}
           priority={QFaceLoadPriority.PANEL}
           className="h-7 w-7 max-w-full object-contain"
           placeholderClassName="h-7 w-7"

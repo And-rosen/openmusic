@@ -473,6 +473,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
               >
                 <QFaceImage
                   id={face.id}
+                  tooltip={false}
                   priority={QFaceLoadPriority.PANEL}
                   nearPriority={QFaceLoadPriority.NEAR}
                   observeRoot={emojiGridRoot}
