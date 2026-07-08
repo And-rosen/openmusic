@@ -76,7 +76,7 @@ export function isLocalStickerImageKey(imageKey?: string | null) {
   return String(imageKey || '').startsWith('local-sticker:');
 }
 
-export const MAX_STICKER_BYTES = 2 * 1024 * 1024;
+export const MAX_STICKER_BYTES = 5 * 1024 * 1024;
 
 export function formatStickerSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -236,7 +236,7 @@ export async function describeStickerSendIssue(stickerId: string): Promise<strin
   if (!blob) return '表情不存在，请删除后重新采集';
   if (!(await isLikelyImageBlob(blob))) return '表情数据无效，请删除后重新采集';
   if (blob.size > MAX_STICKER_BYTES) {
-    return `表情过大（当前 ${formatStickerSize(blob.size)}，限制 2MB），无法发送`;
+    return `表情过大（当前 ${formatStickerSize(blob.size)}，限制 ${formatStickerSize(MAX_STICKER_BYTES)}），无法发送`;
   }
   return null;
 }

@@ -1,5 +1,5 @@
 const LOCAL_STICKER_PREFIX = 'local-sticker:';
-const MAX_DATA_URL_BYTES = 2 * 1024 * 1024;
+const MAX_DATA_URL_BYTES = 5 * 1024 * 1024;
 
 function formatStickerSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -43,7 +43,7 @@ function parseDataUrl(imageUrl) {
     return { error: '无效的表情图片' };
   }
   if (bytes > MAX_DATA_URL_BYTES) {
-    return { error: `表情图片过大（当前 ${formatStickerSize(bytes)}，限制 2MB）` };
+    return { error: `表情图片过大（当前 ${formatStickerSize(bytes)}，限制 ${formatStickerSize(MAX_DATA_URL_BYTES)}）` };
   }
 
   return { ok: true, mime };
