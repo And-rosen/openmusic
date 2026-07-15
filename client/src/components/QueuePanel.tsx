@@ -5,6 +5,7 @@ import { useSocket } from '../hooks/useSocket';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 import QueueRow, { QUEUE_ITEM_SIZE, QUEUE_ROW_GAP, QUEUE_ROW_HEIGHT } from './queue/QueueRow';
 import type { RoomMemberTier, QueueItem } from '../types';
+import { resolveDislikeSkipThreshold } from '../lib/dislikeSkip';
 
 const VISIBLE_ROWS = 3;
 const LIST_HEIGHT = VISIBLE_ROWS * QUEUE_ROW_HEIGHT + (VISIBLE_ROWS - 1) * QUEUE_ROW_GAP;
@@ -19,8 +20,10 @@ type RowData = {
   nickname: string;
   canControlPlayback: boolean;
   memberJumpEnabled: boolean;
+  dislikeSkipThreshold: number;
   currentRef: React.RefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
+  onDislike: () => void;
   onJump: (queueId: string) => void;
   onRemove: (queueId: string) => void;
   onBan: (song: QueueRowSong) => void;
@@ -40,8 +43,10 @@ function VirtualQueueRow({ index, style, data }: ListChildComponentProps<RowData
         nickname={data.nickname}
         canControlPlayback={data.canControlPlayback}
         memberJumpEnabled={data.memberJumpEnabled}
+        dislikeSkipThreshold={data.dislikeSkipThreshold}
         rowRef={song.isCurrent ? data.currentRef : undefined}
         onLike={data.onLike}
+        onDislike={song.isCurrent ? data.onDislike : undefined}
         onJump={data.onJump}
         onRemove={data.onRemove}
         onBan={data.onBan}
@@ -63,7 +68,8 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const memberJumpEnabled = useRoomStore((s) => Boolean(s.room?.memberJumpEnabled));
-  const { removeSong, requestJump, toggleQueueLike, banRoomSong } = useSocket();
+  const dislikeSkipThreshold = useRoomStore((s) => resolveDislikeSkipThreshold(s.room));
+  const { removeSong, requestJump, toggleQueueLike, toggleCurrentDislike, banRoomSong } = useSocket();
   const [jumpMsg, setJumpMsg] = useState('');
   const currentRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<FixedSizeList>(null);
@@ -128,6 +134,21 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     if (!res.success && res.error) showQueueMessage(res.error);
   }, [showQueueMessage, toggleQueueLike]);
 
+  const handleDislike = useCallback(async () => {
+    const res = await toggleCurrentDislike();
+    if (!res.success) {
+      showQueueMessage(res.error || '踩歌失败');
+      return;
+    }
+    if (res.skipped) {
+      showQueueMessage('踩歌人数已满，已切歌');
+      return;
+    }
+    const count = res.dislikeCount ?? 0;
+    const threshold = res.threshold ?? dislikeSkipThreshold;
+    showQueueMessage(res.disliked ? `已踩 ${count}/${threshold}` : `已取消踩 ${count}/${threshold}`);
+  }, [dislikeSkipThreshold, showQueueMessage, toggleCurrentDislike]);
+
   const handleBanSong = useCallback(async (song: QueueRowSong) => {
     setJumpMsg('');
     const res = await banRoomSong({
@@ -155,8 +176,10 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     nickname,
     canControlPlayback,
     memberJumpEnabled,
+    dislikeSkipThreshold,
     currentRef,
     onLike: handleLike,
+    onDislike: handleDislike,
     onJump: handleJumpRequest,
     onRemove: removeSong,
     onBan: handleBanSong,
@@ -167,7 +190,9 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     nickname,
     canControlPlayback,
     memberJumpEnabled,
+    dislikeSkipThreshold,
     handleLike,
+    handleDislike,
     handleJumpRequest,
     removeSong,
     handleBanSong,
@@ -199,8 +224,10 @@ export default function QueuePanel({ fillHeight = false }: Props) {
       nickname={nickname}
       canControlPlayback={canControlPlayback}
       memberJumpEnabled={memberJumpEnabled}
+      dislikeSkipThreshold={dislikeSkipThreshold}
       rowRef={song.isCurrent ? currentRef : undefined}
       onLike={handleLike}
+      onDislike={song.isCurrent ? handleDislike : undefined}
       onJump={handleJumpRequest}
       onRemove={removeSong}
       onBan={handleBanSong}

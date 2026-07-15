@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Trash2, Zap, ThumbsUp, AlertTriangle, Ban } from 'lucide-react';
+import { Trash2, Zap, ThumbsUp, ThumbsDown, AlertTriangle, Ban } from 'lucide-react';
 import { getClientId } from '../../lib/clientId';
 import { useTrackSourceError } from '../../hooks/useSongSourceError';
 import type { RoomMemberTier, QueueItem } from '../../types';
@@ -25,8 +25,10 @@ interface Props {
   nickname: string;
   canControlPlayback: boolean;
   memberJumpEnabled?: boolean;
+  dislikeSkipThreshold?: number;
   rowRef?: React.MutableRefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
+  onDislike?: () => void;
   onJump: (queueId: string) => void;
   onRemove: (queueId: string) => void;
   onBan: (song: QueueRowSong) => void;
@@ -40,8 +42,10 @@ function QueueRow({
   nickname,
   canControlPlayback,
   memberJumpEnabled = false,
+  dislikeSkipThreshold = 5,
   rowRef,
   onLike,
+  onDislike,
   onJump,
   onRemove,
   onBan,
@@ -54,6 +58,9 @@ function QueueRow({
   const likedByIds = Array.isArray(song.likedByIds) ? song.likedByIds : [];
   const likeCount = likedByIds.length;
   const likedByMe = Boolean(myUserId && likedByIds.includes(myUserId));
+  const dislikedByIds = Array.isArray(song.dislikedByIds) ? song.dislikedByIds : [];
+  const dislikeCount = dislikedByIds.length;
+  const dislikedByMe = Boolean(myUserId && dislikedByIds.includes(myUserId));
   const canLike = !isMine;
   const canJump = !song.isCurrent && (canControlPlayback || (isMine && memberJumpEnabled));
   const canRemove = !song.isCurrent && (canControlPlayback || isMine);
@@ -110,6 +117,26 @@ function QueueRow({
             className="w-7 h-7 text-netease-muted hover:text-rose-300"
             iconClassName="w-3.5 h-3.5"
           />
+          {song.isCurrent && onDislike && (
+            <Tooltip content={dislikedByMe
+              ? `取消踩（${dislikeCount}/${dislikeSkipThreshold}）`
+              : `踩歌（${dislikeCount}/${dislikeSkipThreshold}）`}
+            >
+              <button
+                type="button"
+                onClick={onDislike}
+                className={`flex min-w-7 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] transition-colors ${
+                  dislikedByMe
+                    ? 'bg-netease-red/10 text-netease-red'
+                    : 'text-netease-muted hover:bg-white/10 hover:text-white'
+                }`}
+                aria-label="踩歌"
+              >
+                <ThumbsDown className="h-3.5 w-3.5" />
+                {dislikeCount > 0 && <span>{dislikeCount}</span>}
+              </button>
+            </Tooltip>
+          )}
           {!song.isCurrent && (
             <div className="flex flex-shrink-0 items-center gap-0.5">
               {canLike && (

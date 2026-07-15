@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Play, Pause, SkipForward, ChevronUp, Loader2, ThumbsDown } from 'lucide-react';
+import { Play, Pause, SkipForward, ChevronUp, Loader2 } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
@@ -16,7 +16,6 @@ import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 import Tooltip from './Tooltip';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
-import { resolveDislikeSkipThreshold } from '../lib/dislikeSkip';
 
 interface Props {
   onExpand: () => void;
@@ -34,7 +33,7 @@ export default memo(function MiniPlayer({
   variant = 'default',
 }: Props) {
 
-  const { current, isPlaying, fmLoading, skipRequests, hasRoom, room } = useRoomStore(useShallow((s) => {
+  const { current, isPlaying, fmLoading, skipRequests, hasRoom } = useRoomStore(useShallow((s) => {
     const r = s.room;
     return {
       current: r?.current ?? null,
@@ -42,26 +41,20 @@ export default memo(function MiniPlayer({
       fmLoading: Boolean(r?.randomLoading && !r?.current),
       skipRequests: r?.skipRequests,
       hasRoom: Boolean(r),
-      room: r,
     };
   }));
-
-  const dislikeSkipThreshold = resolveDislikeSkipThreshold(room);
 
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const trackLoading = useAudioStore((s) => s.trackLoading);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
-  const { togglePlay, skipSong, requestSkip, toggleCurrentDislike } = useSocket();
+  const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
   const [skipMsg, setSkipMsg] = useState('');
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const hasPendingSkip = skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
-  const dislikedByIds = Array.isArray(current?.dislikedByIds) ? current.dislikedByIds : [];
-  const dislikeCount = dislikedByIds.length;
-  const dislikedByMe = Boolean(mySocketId && dislikedByIds.includes(mySocketId));
 
   const handlePlayPause = () => {
     if (!hasRoom) return;
@@ -97,25 +90,6 @@ export default memo(function MiniPlayer({
     } else {
       setSkipError(res.error || '申请失败');
     }
-  };
-
-  const handleDislike = async () => {
-    setSkipError('');
-    setSkipMsg('');
-    const res = await toggleCurrentDislike();
-    if (!res.success) {
-      setSkipError(res.error || '踩歌失败');
-      return;
-    }
-    if (res.skipped) {
-      setSkipMsg('踩歌人数已满，已切歌');
-      setTimeout(() => setSkipMsg(''), 3000);
-      return;
-    }
-    const count = res.dislikeCount ?? dislikeCount;
-    const threshold = res.threshold ?? dislikeSkipThreshold;
-    setSkipMsg(res.disliked ? `已踩 ${count}/${threshold}` : `已取消踩 ${count}/${threshold}`);
-    setTimeout(() => setSkipMsg(''), 2500);
   };
 
 
@@ -234,17 +208,6 @@ export default memo(function MiniPlayer({
                 </button>
               </Tooltip>
             )}
-            <Tooltip content={dislikedByMe ? `取消踩（${dislikeCount}/${dislikeSkipThreshold}）` : `踩歌（${dislikeCount}/${dislikeSkipThreshold}）`}>
-              <button
-                type="button"
-                onClick={handleDislike}
-                className={`mineradio-ctrl-btn ${dislikedByMe ? 'text-netease-red' : ''}`}
-                aria-label="踩歌"
-              >
-                <ThumbsDown className="h-4 w-4" />
-                {dislikeCount > 0 && <span className="ml-0.5 text-[10px]">{dislikeCount}</span>}
-              </button>
-            </Tooltip>
           </div>
 
           <div className="control-cluster modes">
@@ -430,20 +393,6 @@ export default memo(function MiniPlayer({
             </button>
           </Tooltip>
         )}
-
-        <Tooltip content={dislikedByMe ? `取消踩（${dislikeCount}/${dislikeSkipThreshold}）` : `踩歌（${dislikeCount}/${dislikeSkipThreshold}）`}>
-          <button
-            type="button"
-            onClick={handleDislike}
-            className={`w-8 h-8 flex items-center justify-center gap-0.5 transition-colors ${
-              dislikedByMe ? 'text-netease-red' : 'text-netease-muted hover:text-white'
-            }`}
-            aria-label="踩歌"
-          >
-            <ThumbsDown className="w-4 h-4" />
-            {dislikeCount > 0 && <span className="text-[10px]">{dislikeCount}</span>}
-          </button>
-        </Tooltip>
 
         <VolumeControl compact className="flex-shrink-0" />
         <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />

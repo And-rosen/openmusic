@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 
 import {
-  ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check, ThumbsDown,
+  ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check,
 } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { copyToClipboard } from '../lib/copyToClipboard';
@@ -24,7 +24,6 @@ import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 import AmbientCoverLayers from './AmbientCoverLayers';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
-import { resolveDislikeSkipThreshold } from '../lib/dislikeSkip';
 
 
 
@@ -48,7 +47,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
-  const { togglePlay, skipSong, requestSkip, toggleCurrentDislike } = useSocket();
+  const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
   const [skipMsg, setSkipMsg] = useState('');
@@ -62,10 +61,6 @@ export default memo(function PlayerPage({ onClose }: Props) {
   const isPlaying = room?.isPlaying ?? false;
 
   const hasPendingSkip = room?.skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
-  const dislikeSkipThreshold = resolveDislikeSkipThreshold(room);
-  const dislikedByIds = Array.isArray(current?.dislikedByIds) ? current.dislikedByIds : [];
-  const dislikeCount = dislikedByIds.length;
-  const dislikedByMe = Boolean(mySocketId && dislikedByIds.includes(mySocketId));
 
 
 
@@ -106,25 +101,6 @@ export default memo(function PlayerPage({ onClose }: Props) {
     } else {
       setSkipError(res.error || '申请失败');
     }
-  };
-
-  const handleDislike = async () => {
-    setSkipError('');
-    setSkipMsg('');
-    const res = await toggleCurrentDislike();
-    if (!res.success) {
-      setSkipError(res.error || '踩歌失败');
-      return;
-    }
-    if (res.skipped) {
-      setSkipMsg('踩歌人数已满，已切歌');
-      setTimeout(() => setSkipMsg(''), 3000);
-      return;
-    }
-    const count = res.dislikeCount ?? dislikeCount;
-    const threshold = res.threshold ?? dislikeSkipThreshold;
-    setSkipMsg(res.disliked ? `已踩 ${count}/${threshold}` : `已取消踩 ${count}/${threshold}`);
-    setTimeout(() => setSkipMsg(''), 2500);
   };
 
 
@@ -293,22 +269,6 @@ export default memo(function PlayerPage({ onClose }: Props) {
               </button>
             </Tooltip>
           )}
-
-          <Tooltip content={dislikedByMe ? `取消踩（${dislikeCount}/${dislikeSkipThreshold}）` : `踩歌（${dislikeCount}/${dislikeSkipThreshold}）`}>
-            <button
-              type="button"
-              onClick={handleDislike}
-              className={`w-10 h-10 sm:w-12 sm:h-12 2xl:w-20 2xl:h-20 flex items-center justify-center gap-0.5 transition-colors ${
-                dislikedByMe ? 'text-netease-red' : 'text-white/70 hover:text-white'
-              }`}
-              aria-label="踩歌"
-            >
-              <ThumbsDown className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8" />
-              {dislikeCount > 0 && (
-                <span className="text-[10px] sm:text-xs 2xl:text-sm">{dislikeCount}</span>
-              )}
-            </button>
-          </Tooltip>
 
         </div>
 
