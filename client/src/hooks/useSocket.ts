@@ -205,12 +205,16 @@ function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
   }
 
   if (res.socketId) {
+    const canControl = typeof res.canControlPlayback === 'boolean'
+      ? res.canControlPlayback
+      : undefined;
     useRoomStore.getState().setConnectionInfo(
       res.socketId,
       Boolean(res.isOwner),
       res.connectionId || null,
       Boolean(res.isAdmin),
       Boolean(res.isPlaybackLeader),
+      canControl,
     );
   }
   if (res.room.current || res.room.nextRandom || (res.room.queue?.length ?? 0) > 0) {
@@ -224,8 +228,17 @@ function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
 
 function applyRoomSnapshot(room: RoomState, force = false) {
   const current = useRoomStore.getState().room;
-  useRoomStore.getState().setRoom(force ? room : mergeRoomState(room, current));
+  const merged = force ? room : mergeRoomState(room, current);
+  useRoomStore.getState().setRoom(merged);
   useRoomStore.getState().syncRolesFromRoom(room);
+
+  // 房主开启「进房可看历史」后，放开本地聊天截断，允许上滑拉取更早消息
+  if (
+    merged.chatHistoryVisibleOnJoin
+    && useChatStore.getState().roomId === merged.id
+  ) {
+    useChatStore.getState().unlockChatHistory();
+  }
 }
 
 function applyJoinSnapshot(room: RoomState, playbackState?: PlaybackState) {
@@ -503,6 +516,11 @@ let prefetchDebounceTimer = 0;
       useChatStore.getState().append(message);
     };
 
+    const onChatMessageRecall = ({ messageId }: { messageId: string }) => {
+      if (!messageId) return;
+      useChatStore.getState().remove(messageId);
+    };
+
     const onChatReactionUpdate = ({
       messageId,
       reactions,
@@ -549,6 +567,8 @@ let prefetchDebounceTimer = 0;
     s.on('queue_snapshot', onQueueSnapshot);
 
     s.on('chat_message', onChatMessage);
+
+    s.on('chat_message_recall', onChatMessageRecall);
 
     s.on('chat_reaction_update', onChatReactionUpdate);
 
@@ -860,6 +880,16 @@ if (s.connected) {
     );
   }, []);
 
+  const recallChat = useCallback((
+    messageId: string,
+  ): Promise<{ success: boolean; error?: string }> => {
+    return emitWithAck(
+      'recall_chat',
+      { messageId },
+      { success: false, error: '连接超时，请重试' },
+    );
+  }, []);
+
   const listFavorites = useCallback((): Promise<{ success: boolean; favorites?: FavoriteSong[]; error?: string }> => {
     return emitWithAck('list_favorites', {}, { success: false, error: '连接超时，请重试' });
   }, []);
@@ -979,6 +1009,19 @@ if (s.connected) {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_announcement',
       options,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const setChatHistoryVisibleOnJoin = useCallback((enabled: boolean): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_chat_history',
+      { enabled },
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
@@ -1197,6 +1240,7 @@ if (s.connected) {
 
     toggleChatReaction,
 
+    recallChat,
 
     listFavorites,
 
@@ -1217,6 +1261,8 @@ if (s.connected) {
     setRoomFmMode,
 
     setRoomAnnouncement,
+
+    setChatHistoryVisibleOnJoin,
 
     setSongRequestEnabled,
 

@@ -113,7 +113,7 @@ export interface ChatMessage {
   imageUrl?: string | null;
   imageKey?: string | null;
   asSticker?: boolean;
-  kind?: 'chat' | 'welcome' | 'system';
+  kind?: 'chat' | 'welcome' | 'system' | 'recall';
   mentions?: ChatMention[];
   replyTo?: ChatReplyRef | null;
   timestamp: number;
@@ -143,8 +143,10 @@ export interface RoomState {
   ownerId: string | null;
   /** 房间初创房主（永久身份，唯一显示「房主」） */
   creatorId?: string | null;
-  /** 管理员（最多 3 人），可控制播放 */
+  /** 管理员（最多 3 人，仅房主指定的正式管理） */
   adminIds?: string[];
+  /** 临时自动提升管理（仅播放权，不含管理敏感字段） */
+  autoPromotedAdminIds?: string[];
   /** 曾进房用户的最近昵称（用于离线管理员展示） */
   userNicknames?: Record<string, string>;
   ownerConnectionId?: string | null;
@@ -175,6 +177,8 @@ export interface RoomState {
   announcementEnabled?: boolean;
   /** 公告内容 */
   announcementText?: string;
+  /** 进房是否可查看聊天历史（关闭时仅见进房后的消息） */
+  chatHistoryVisibleOnJoin?: boolean;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
   /** 是否允许成员为自己的点歌插队（默认关闭，房主/管理员始终可插队） */

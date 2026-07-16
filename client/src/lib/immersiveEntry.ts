@@ -1,5 +1,6 @@
 import { getCoverUrl } from '../api/music';
 import type { QueueItem } from '../types';
+import type { RoomVisualMode } from './roomVisualPreset';
 import {
   isTrustedMediaDurationSeconds,
   resolveAutoSkipThresholdSeconds,
@@ -35,6 +36,15 @@ export { preloadImage };
 
 export function preloadGalaxyBackground(): Promise<unknown> {
   return import('../components/galaxy/GalaxyBackground3D');
+}
+
+export function preloadTopographyBackground(): Promise<unknown> {
+  return import('../components/topography/TopographyBackground3D');
+}
+
+export function preloadImmersiveBackground(mode: RoomVisualMode): Promise<unknown> {
+  if (mode === 'topography') return preloadTopographyBackground();
+  return preloadGalaxyBackground();
 }
 
 async function waitForCurrentTrackProxyReady(
@@ -126,6 +136,7 @@ async function syncRoomPlaybackAfterProxyReload(song: QueueItem): Promise<void> 
 export interface PrepareImmersiveEnterOptions {
   song: QueueItem | null;
   needsProxyReload: boolean;
+  mode?: RoomVisualMode;
 }
 
 /** 代理音源切换与播放对齐（进入沉浸专用） */
@@ -144,10 +155,10 @@ export async function reloadImmersiveTrackProxy(song: QueueItem): Promise<void> 
 
 /** 进入沉浸模式前预加载 Galaxy chunk、封面与（如需）代理音源 */
 export async function prepareImmersiveEnter(options: PrepareImmersiveEnterOptions): Promise<void> {
-  const { song, needsProxyReload } = options;
+  const { song, needsProxyReload, mode = 'emily' } = options;
   const coverUrl = song ? getCoverUrl(song, 'medium') : null;
 
-  const tasks: Promise<unknown>[] = [preloadGalaxyBackground()];
+  const tasks: Promise<unknown>[] = [preloadImmersiveBackground(mode)];
 
   if (coverUrl) {
     tasks.push(preloadImage(coverUrl));

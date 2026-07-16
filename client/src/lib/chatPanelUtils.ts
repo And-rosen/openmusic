@@ -1,3 +1,37 @@
+export const CHAT_RECALL_WINDOW_MS = 2 * 60 * 1000;
+
+export function canRecallChatMessage(
+  msg: { userId: string; kind?: string; timestamp: number },
+  myUserId: string,
+  options: {
+    canModerate?: boolean;
+    isOwner?: boolean;
+    creatorId?: string | null;
+    adminIds?: string[];
+    now?: number;
+  } = {},
+): boolean {
+  if (!myUserId) return false;
+  if (msg.kind && msg.kind !== 'chat') return false;
+  const isSelf = msg.userId === myUserId;
+  if (!isSelf && !options.canModerate) return false;
+  if (!isSelf && options.canModerate) {
+    if (options.creatorId && msg.userId === options.creatorId) return false;
+    if (
+      !options.isOwner
+      && Array.isArray(options.adminIds)
+      && options.adminIds.includes(msg.userId)
+    ) {
+      return false;
+    }
+  }
+  if (isSelf && !options.canModerate) {
+    const now = options.now ?? Date.now();
+    return now - (msg.timestamp || 0) <= CHAT_RECALL_WINDOW_MS;
+  }
+  return true;
+}
+
 export function formatChatTime(timestamp: number): string {
   if (!timestamp) return '';
   try {

@@ -39,13 +39,15 @@ export function getSongRequestBlockReason(
   isAdmin: boolean,
   mySocketId: string | null,
   lastSongRequestAt?: number | null,
+  canControlPlayback = false,
 ): string | null {
   if (!room) return '未加入房间';
-  if (room.songRequestEnabled === false && !isOwner && !isAdmin) {
+  const privileged = isOwner || isAdmin || canControlPlayback;
+  if (room.songRequestEnabled === false && !privileged) {
     return '房主已禁止点歌';
   }
 
-  if (isOwner || isAdmin) return null;
+  if (privileged) return null;
   if (!mySocketId) return null;
 
   const user = room.users.find((entry) => entry.id === mySocketId);

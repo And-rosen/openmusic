@@ -1,7 +1,13 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { compression } from 'vite-plugin-compression2';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { buildRobotsTxt, buildSitemapXml, resolveDevSiteOrigin } from '../server/seoFiles.js';
+import { buildAppVersionMeta, writeVersionJson } from '../scripts/app-version.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const appVersionMeta = buildAppVersionMeta();
 
 function seoDevMiddleware() {
   return {
@@ -24,10 +30,33 @@ function seoDevMiddleware() {
   };
 }
 
+/** 构建产物写入 version.json，供 /api/app-version 与更新检测使用 */
+function appVersionPlugin(): Plugin {
+  return {
+    name: 'openmusic-app-version',
+    apply: 'build',
+    writeBundle(outputOptions) {
+      const outDir = outputOptions.dir || path.join(__dirname, 'dist');
+      const filePath = writeVersionJson(outDir, appVersionMeta);
+      console.log(`[app-version] ${appVersionMeta.buildId} → ${filePath}`);
+      if (appVersionMeta.notes.length) {
+        for (const note of appVersionMeta.notes) {
+          console.log(`  - ${note}`);
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig({
+  define: {
+    __APP_BUILD_ID__: JSON.stringify(appVersionMeta.buildId),
+    __APP_VERSION_NOTES__: JSON.stringify(appVersionMeta.notes),
+  },
   plugins: [
     react(),
     seoDevMiddleware(),
+    appVersionPlugin(),
     compression({
       threshold: 1024,
       algorithms: ['gzip', 'brotliCompress'],
@@ -44,9 +73,10 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        entryFileNames: 'assets/[name].js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name][extname]',
+        // 带 content hash，避免 EdgeOne/CDN 长期缓存同名旧包
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
         manualChunks(id) {
           if (!id.includes('node_modules')) {
             // 聊天相关拆出，避免塞进 Room 主包

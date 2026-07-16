@@ -146,12 +146,12 @@ export default memo(function MiniPlayer({
         <div className="mineradio-controls">
           <div className="control-cluster actions">
             <button type="button" className="control-track text-left" onClick={onExpand}>
-              <SongCover
-                song={current}
-                size="tiny"
-                eager
-                className="control-cover"
-              />
+          <SongCover
+            song={current}
+            size="tiny"
+            eager
+            className="control-cover bg-netease-card"
+          />
               <div className="control-meta">
                 <div className="control-title">{current.name}</div>
                 <div className="control-artist">{current.artist}</div>
@@ -310,7 +310,7 @@ export default memo(function MiniPlayer({
             song={current}
             size="tiny"
             eager
-            className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg object-cover flex-shrink-0"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg object-cover bg-netease-card flex-shrink-0"
           />
 
           <div className="min-w-0 hidden sm:block">

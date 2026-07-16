@@ -22,6 +22,7 @@ import {
   getStoredRoomPassword,
   parseRoomPasswordFromSearch,
   rememberRoomPassword,
+  stripRoomPasswordFromSearch,
 } from '../lib/roomPassword';
 
 export default function TvDisplay() {
@@ -76,6 +77,19 @@ export default function TvDisplay() {
       // 部分电视浏览器不支持或需用户手势
     }
   };
+
+  useEffect(() => {
+    if (!roomId) return;
+    const fromUrl = parseRoomPasswordFromSearch(location.search);
+    if (!fromUrl) return;
+    rememberRoomPassword(roomId, fromUrl);
+    const nextSearch = stripRoomPasswordFromSearch(location.search);
+    if (nextSearch === location.search) return;
+    navigate(
+      { pathname: location.pathname, search: nextSearch },
+      { replace: true, state: location.state },
+    );
+  }, [roomId, location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     if (!roomId) return;

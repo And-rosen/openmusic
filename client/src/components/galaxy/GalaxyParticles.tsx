@@ -19,11 +19,11 @@ import { toProxiedMediaUrl } from '../../lib/mediaProxyUrl';
 import { effectiveBloomStrength, syncGalaxyFxUniforms } from './lib/syncVisualUniforms';
 import { buildCoverEdgeTexture } from './lib/buildCoverEdgeTexture';
 import {
+  cloneCoverCanvas,
+  cloneEdgeCanvas,
   coverTextureSizeForResolution,
   makeSquareCoverCanvas,
   sampleCoverAccentColor,
-  snapshotCoverToPrevTexture,
-  snapshotEdgeToPrevTexture,
 } from './lib/coverCanvas';
 import { updateLyricPaletteFromCover } from '../../lib/stageLyricPaletteLive';
 import { startCoverColorMixTween } from './lib/coverColorMix';
@@ -137,6 +137,26 @@ function applyCoverTextureSettings(tex: THREE.Texture): void {
   tex.wrapT = THREE.ClampToEdgeWrapping;
 }
 
+/** 尺寸变化时必须新建纹理，禁止改 image 后 needsUpdate（会触发 copySubTexture 溢出） */
+function replacePrevCanvasTexture(
+  ref: { current: THREE.Texture },
+  canvas: HTMLCanvasElement,
+  kind: 'cover' | 'edge',
+): THREE.CanvasTexture {
+  const next = new THREE.CanvasTexture(canvas);
+  if (kind === 'cover') {
+    applyCoverTextureSettings(next);
+  } else {
+    next.minFilter = THREE.LinearFilter;
+    next.magFilter = THREE.LinearFilter;
+  }
+  next.needsUpdate = true;
+  const prev = ref.current;
+  ref.current = next;
+  if (prev && prev !== next) prev.dispose();
+  return next;
+}
+
 function createFloatLayer(uniforms: SharedUniforms) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(FLOAT_COUNT * 3);
@@ -242,7 +262,7 @@ void main(){
   points.renderOrder = 1;
 
   const refreshColorsFromCover = (coverCanvas: HTMLCanvasElement) => {
-    const ctx = coverCanvas.getContext('2d');
+    const ctx = coverCanvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     const img = ctx.getImageData(0, 0, coverCanvas.width, coverCanvas.height).data;
     const w = coverCanvas.width;
@@ -344,7 +364,7 @@ void main(){
   points.renderOrder = 0;
 
   const refreshColorsFromCover = (coverCanvas: HTMLCanvasElement) => {
-    const ctx = coverCanvas.getContext('2d');
+    const ctx = coverCanvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     const img = ctx.getImageData(0, 0, coverCanvas.width, coverCanvas.height).data;
     const w = coverCanvas.width;
@@ -527,15 +547,24 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       const hasPrevCover = uniforms.uHasCover.value > 0.5 && coverTex.current?.image;
 
       if (hasPrevCover) {
-        snapshotCoverToPrevTexture(
-          coverTex.current.image as CanvasImageSource,
-          prevCoverTex.current,
-        );
-        uniforms.uPrevCoverTex.value = prevCoverTex.current;
+        const prevCoverCv = cloneCoverCanvas(coverTex.current.image as CanvasImageSource);
+        if (prevCoverCv) {
+          uniforms.uPrevCoverTex.value = replacePrevCanvasTexture(
+            prevCoverTex,
+            prevCoverCv,
+            'cover',
+          );
+        }
         const prevEdgeImg = edgeTexRef.current?.image;
         if (prevEdgeImg instanceof HTMLCanvasElement && prevEdgeImg.width > 4) {
-          snapshotEdgeToPrevTexture(prevEdgeImg, prevEdgeTex.current);
-          uniforms.uPrevEdgeTex.value = prevEdgeTex.current;
+          const prevEdgeCv = cloneEdgeCanvas(prevEdgeImg);
+          if (prevEdgeCv) {
+            uniforms.uPrevEdgeTex.value = replacePrevCanvasTexture(
+              prevEdgeTex,
+              prevEdgeCv,
+              'edge',
+            );
+          }
         }
       }
 
@@ -652,15 +681,24 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       setParticleGrid(nextGrid);
       const cached = coverImageCacheRef.current;
       if (cached && uniforms.uHasCover.value > 0.5) {
-        snapshotCoverToPrevTexture(
-          coverTex.current.image as CanvasImageSource,
-          prevCoverTex.current,
-        );
-        uniforms.uPrevCoverTex.value = prevCoverTex.current;
+        const prevCoverCv = cloneCoverCanvas(coverTex.current.image as CanvasImageSource);
+        if (prevCoverCv) {
+          uniforms.uPrevCoverTex.value = replacePrevCanvasTexture(
+            prevCoverTex,
+            prevCoverCv,
+            'cover',
+          );
+        }
         const prevEdgeImg = edgeTexRef.current?.image;
         if (prevEdgeImg instanceof HTMLCanvasElement && prevEdgeImg.width > 4) {
-          snapshotEdgeToPrevTexture(prevEdgeImg, prevEdgeTex.current);
-          uniforms.uPrevEdgeTex.value = prevEdgeTex.current;
+          const prevEdgeCv = cloneEdgeCanvas(prevEdgeImg);
+          if (prevEdgeCv) {
+            uniforms.uPrevEdgeTex.value = replacePrevCanvasTexture(
+              prevEdgeTex,
+              prevEdgeCv,
+              'edge',
+            );
+          }
         }
 
         const texSize = coverTextureSizeForResolution(currentFx.coverResolution);

@@ -26,8 +26,10 @@ type PendingAction =
 export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNotice }: Props) {
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const isOwner = useRoomStore((s) => s.isOwner);
-  const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
+  const isAdmin = useRoomStore((s) => s.isAdmin);
+  const canModerate = isOwner || isAdmin;
   const adminIds = useRoomStore((s) => s.room?.adminIds) || [];
+  const autoPromotedAdminIds = useRoomStore((s) => s.room?.autoPromotedAdminIds) || [];
   const userNicknames = useRoomStore((s) => s.room?.userNicknames) || {};
   const nickname = useRoomStore((s) => s.nickname);
   const setNickname = useRoomStore((s) => s.setNickname);
@@ -116,7 +118,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   };
 
   const handleKick = (user: DisplayUser) => {
-    if (!canControlPlayback || kickingId || user.offline) return;
+    if (!canModerate || kickingId || user.offline) return;
     setPendingAction({ type: 'kick', user });
   };
 
@@ -162,11 +164,12 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   };
 
   const canKick = (user: DisplayUser) => (
-    canControlPlayback
+    canModerate
     && !user.offline
     && user.id !== mySocketId
     && user.id !== creatorId
     && !adminIds.includes(user.id)
+    && (isOwner || !autoPromotedAdminIds.includes(user.id))
   );
 
   const canToggleAdmin = (user: DisplayUser) => (

@@ -14,7 +14,7 @@ const CLEAR_ON_LEAVE_DELAY_MINUTES_MAX = 24 * 60;
 const COOLDOWN_OPTIONS = [0, 10, 30, 60, 120] as const;
 const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
-type SettingsTab = 'fm' | 'member' | 'announcement' | 'songRequest';
+type SettingsTab = 'fm' | 'member' | 'announcement' | 'chat' | 'songRequest';
 
 export interface SongRequestSettings {
   enabled: boolean;
@@ -57,6 +57,8 @@ interface Props {
   announcementEnabled: boolean;
   announcementText: string;
   announcementSaving?: boolean;
+  chatHistoryVisibleOnJoin: boolean;
+  chatHistorySaving?: boolean;
   songRequest: SongRequestSettings;
   songRequestSaving?: boolean;
   bannedSongs?: BannedSong[];
@@ -66,6 +68,7 @@ interface Props {
   onSaveFmMode: (mode: string) => void;
   onOpenMemberModal: () => void;
   onSaveAnnouncement: (options: { enabled: boolean; text: string }) => void;
+  onSaveChatHistory: (enabled: boolean) => void;
   onSaveSongRequest: (settings: SongRequestSettings) => void;
 }
 
@@ -185,6 +188,8 @@ export default function RoomSettingsModal({
   announcementEnabled,
   announcementText,
   announcementSaving = false,
+  chatHistoryVisibleOnJoin,
+  chatHistorySaving = false,
   songRequest,
   songRequestSaving = false,
   bannedSongs = [],
@@ -194,6 +199,7 @@ export default function RoomSettingsModal({
   onSaveFmMode,
   onOpenMemberModal,
   onSaveAnnouncement,
+  onSaveChatHistory,
   onSaveSongRequest,
 }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('announcement');
@@ -212,6 +218,7 @@ export default function RoomSettingsModal({
     }
     if (canModerate) {
       items.push({ id: 'announcement', label: '公告' });
+      items.push({ id: 'chat', label: '聊天' });
       items.push({ id: 'songRequest', label: '点歌' });
     }
     return items;
@@ -309,7 +316,7 @@ export default function RoomSettingsModal({
         <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
           <div>
             <h2 className="text-base font-semibold text-white">房间设置</h2>
-            <p className="mt-0.5 text-xs text-netease-muted">漫游、贵宾、公告与点歌规则</p>
+            <p className="mt-0.5 text-xs text-netease-muted">漫游、贵宾、公告、聊天与点歌规则</p>
           </div>
           <button
             type="button"
@@ -443,6 +450,20 @@ export default function RoomSettingsModal({
                     </button>
                   </div>
                 )}
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'chat' && canModerate && (
+            <section>
+              <div className="space-y-3">
+                <Toggle
+                  checked={chatHistoryVisibleOnJoin}
+                  disabled={chatHistorySaving}
+                  onChange={onSaveChatHistory}
+                  label="进房可查看历史消息"
+                  description="开启后，成员进入房间可浏览此前聊天记录；关闭则仅能看到进房之后的消息"
+                />
               </div>
             </section>
           )}

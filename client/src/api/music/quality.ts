@@ -1,6 +1,7 @@
 import type { MusicSource, RoomAudioQuality } from '../../types';
 import { useRoomStore } from '../../stores/roomStore';
 import { resolveEffectiveAudioQuality } from '../../stores/userQualityStore';
+import { useImmersiveModeStore } from '../../stores/immersiveModeStore';
 
 export type NeteaseQuality = 'standard' | 'exhigh' | 'lossless' | 'higher' | 'hires' | '128' | '320' | 'flac';
 export type TencentQuality = 'standard' | 'exhigh' | 'lossless' | '128' | '320' | 'flac';
@@ -9,6 +10,9 @@ export const DEFAULT_ROOM_AUDIO_QUALITY: RoomAudioQuality = {
   netease: 'hires',
   tencent: 'lossless',
 };
+
+/** 沉浸模式本机播放音质上限（不改写用户设置） */
+export const IMMERSIVE_PLAYBACK_QUALITY_CAP = 'exhigh';
 
 export interface QualityOption {
   value: string;
@@ -72,19 +76,42 @@ export function getRoomPlaybackQuality(source: MusicSource): string | undefined 
   return undefined;
 }
 
-/** 本机自选音质，仅用于拉取播放地址，不影响房间同步逻辑 */
-export function getUserPlaybackQuality(source: MusicSource): string | undefined {
-  const room = useRoomStore.getState().room;
-  const quality = resolveEffectiveAudioQuality(room?.audioQuality);
-  if (source === 'netease') return quality.netease;
-  if (source === 'tencent') return quality.tencent;
-  return undefined;
-}
-
 export function getQualityOptionsForSource(source: MusicSource): QualityOption[] {
   if (source === 'netease') return NETEASE_QUALITY_OPTIONS;
   if (source === 'tencent') return TENCENT_QUALITY_OPTIONS;
   return [];
+}
+
+/** 沉浸模式：音质不超过极高；若用户设置更低则沿用设置 */
+export function capQualityForImmersive(source: MusicSource, quality: string): string {
+  const options = getQualityOptionsForSource(source);
+  if (options.length === 0) return quality;
+  const normalized = QUALITY_ALIASES[quality] || quality;
+  const capIndex = options.findIndex((opt) => opt.value === IMMERSIVE_PLAYBACK_QUALITY_CAP);
+  if (capIndex < 0) return normalized;
+  const currentIndex = options.findIndex((opt) => opt.value === normalized);
+  if (currentIndex < 0) return IMMERSIVE_PLAYBACK_QUALITY_CAP;
+  return currentIndex <= capIndex ? normalized : IMMERSIVE_PLAYBACK_QUALITY_CAP;
+}
+
+export function applyImmersivePlaybackQualityCap(quality: RoomAudioQuality): RoomAudioQuality {
+  return {
+    netease: capQualityForImmersive('netease', quality.netease),
+    tencent: capQualityForImmersive('tencent', quality.tencent),
+  };
+}
+
+/** 本机自选音质，仅用于拉取播放地址，不影响房间同步逻辑 */
+export function getUserPlaybackQuality(source: MusicSource): string | undefined {
+  const room = useRoomStore.getState().room;
+  let quality = resolveEffectiveAudioQuality(room?.audioQuality);
+  const immersive = useImmersiveModeStore.getState();
+  if (immersive.qualityCapActive || immersive.enabled) {
+    quality = applyImmersivePlaybackQualityCap(quality);
+  }
+  if (source === 'netease') return quality.netease;
+  if (source === 'tencent') return quality.tencent;
+  return undefined;
 }
 
 /** 降一级音质；已在最低档时返回 null */

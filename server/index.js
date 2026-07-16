@@ -1,6 +1,10 @@
 import './loadEnv.js';
 import { resizeCoverForThumb } from './coverUrl.js';
-import { serveUpstreamMedia } from './mediaProxy.js';
+import {
+  isAllowedMediaHostname,
+  isBlockedMediaHostname,
+  serveUpstreamMedia,
+} from './mediaProxy.js';
 import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
@@ -41,6 +45,7 @@ import {
   postMemberWelcomeMessage,
   setRoomFmMode,
   setRoomAnnouncement,
+  setChatHistoryVisibleOnJoin,
   setSongRequestEnabled,
   banRoomSong,
   unbanRoomSong,
@@ -67,6 +72,7 @@ import {
   approveSkip,
   rejectSkip,
   addChatMessage,
+  recallChatMessage,
   toggleChatReaction,
   getChatHistoryForUser,
   getSongHistory,
@@ -103,6 +109,7 @@ import {
 } from './apihzSticker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const clientDist = path.join(__dirname, '../client/dist');
 const PORT = process.env.PORT || 4000;
 const METING_API_URL = (process.env.METING_API_URL ).replace(/\/$/, '');
 const METING_API_AUTH = process.env.METING_API_AUTH || '';
@@ -115,13 +122,27 @@ const ALLOWED_ORIGINS = CLIENT_URL
   : null;
 const CLIENT_ID_SECRET = process.env.CLIENT_ID_SECRET || randomBytes(32).toString('hex');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
+/** 会话 HMAC 有效期（秒），默认 90 天 */
+const SESSION_TTL_SEC = Math.max(
+  60 * 60 * 24,
+  parseInt(process.env.SESSION_TTL_SEC || String(60 * 60 * 24 * 90), 10) || (60 * 60 * 24 * 90),
+);
+/** 剩余有效期低于此值时 bootstrap 静默续签 */
+const SESSION_RENEW_WITHIN_SEC = Math.min(
+  60 * 60 * 24 * 7,
+  Math.max(60 * 60, Math.floor(SESSION_TTL_SEC / 3)),
+);
 
 if (IS_PRODUCTION && !ALLOWED_ORIGINS) {
   console.warn('安全告警: NODE_ENV=production 但未配置 CLIENT_URL，浏览器跨域请求将被拒绝');
 }
+if (IS_PRODUCTION && !(process.env.CLIENT_ID_SECRET || '').trim()) {
+  console.warn('安全告警: NODE_ENV=production 但未配置 CLIENT_ID_SECRET，重启后所有会话将失效');
+}
 
 const app = express();
-app.set('trust proxy', 'loopback');
+app.set('trust proxy', TRUST_PROXY || IS_PRODUCTION ? 1 : 'loopback');
 const httpServer = createServer(app);
 
 function corsOrigin(origin, callback) {
@@ -143,8 +164,8 @@ const io = new Server(httpServer, {
     origin: corsOrigin,
     methods: ['GET', 'POST'],
   },
-  // 本地表情包以 data URL 经 WS 发送，默认 1MB 缓冲会直接断开连接
-  maxHttpBufferSize: 8 * 1024 * 1024,
+  // 表情 data URL 需 >1MB；4MB 兼顾防大包 DoS 与本地贴纸
+  maxHttpBufferSize: 4 * 1024 * 1024,
   // base64 表情几乎压不动，抬高阈值避免人多时 CPU 被 deflate 打满
   perMessageDeflate: {
     threshold: 262144,
@@ -153,6 +174,16 @@ const io = new Server(httpServer, {
 });
 
 app.use(cors({ origin: corsOrigin }));
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (IS_PRODUCTION) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 app.use(express.json({
   limit: '2mb',
   verify: (req, _res, buf) => {
@@ -181,11 +212,25 @@ function normalizeClientIp(raw) {
 }
 
 function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
+  // 未接反代时只用 socket 地址，避免客户端伪造 XFF 绕过限流
+  const trustForwarded = TRUST_PROXY || IS_PRODUCTION;
+  if (!trustForwarded) {
+    return normalizeClientIp(remoteAddress || '');
+  }
+
+  // Nginx 覆盖写入的 X-Real-IP 优先于可被伪造的 XFF 首段
+  const realIp = Array.isArray(headers['x-real-ip']) ? headers['x-real-ip'][0] : headers['x-real-ip'];
+  if (realIp) return normalizeClientIp(realIp);
+
   const forwarded = headers['x-forwarded-for'];
   const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  const firstForwarded = rawForwarded?.split(',')[0]?.trim();
-  const realIp = Array.isArray(headers['x-real-ip']) ? headers['x-real-ip'][0] : headers['x-real-ip'];
-  return normalizeClientIp(firstForwarded || realIp || remoteAddress || '');
+  if (rawForwarded) {
+    const parts = String(rawForwarded).split(',').map((part) => part.trim()).filter(Boolean);
+    // 可信代理追加在末尾；取最后一段
+    if (parts.length > 0) return normalizeClientIp(parts[parts.length - 1]);
+  }
+
+  return normalizeClientIp(remoteAddress || '');
 }
 
 function logIpDebug(scope, headers, remoteAddress, resolvedIp) {
@@ -217,10 +262,13 @@ function isPrivateIp(ip) {
     !ip
     || ip === '::1'
     || ip === '127.0.0.1'
+    || ip === '0.0.0.0'
     || ip.startsWith('10.')
     || ip.startsWith('192.168.')
+    || ip.startsWith('169.254.')
     || /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)
     || /^fc|^fd/i.test(ip)
+    || /^fe80:/i.test(ip)
   );
 }
 const ipLocationCache = new Map();
@@ -313,6 +361,7 @@ function createRateLimiter({ windowMs, max }) {
 
 const limitRoomCreate = createRateLimiter({ windowMs: 60_000, max: 20 });
 const limitJoinAttempt = createRateLimiter({ windowMs: 60_000, max: 30 });
+const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -331,7 +380,6 @@ function sanitizeClientSong(song) {
     return { error: '歌曲数据缺少 id 或名称' };
   }
 
-  const duration = Number(song.duration);
   const sanitized = {
     id,
     source,
@@ -339,9 +387,7 @@ function sanitizeClientSong(song) {
     artist,
     album: limitText(song.album, 100) || undefined,
     pic: limitText(song.pic, 1000) || undefined,
-    duration: Number.isFinite(duration) && duration > 0 && duration < 24 * 60 * 60 * 1000
-      ? duration
-      : undefined,
+    // 不信任客户端上报的时长，避免伪造超短 duration 触发自动切歌
   };
 
   // 歌词/播放 URL 由客户端按需拉取，服务端不持久化。
@@ -503,8 +549,31 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+/** 前端更新检测：走 /api 绕过 EdgeOne 静态缓存；no-store 防中间层缓存 */
+app.get('/api/app-version', (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  const versionPath = path.join(clientDist, 'version.json');
+  try {
+    if (fs.existsSync(versionPath)) {
+      const raw = fs.readFileSync(versionPath, 'utf8');
+      const data = JSON.parse(raw);
+      return res.json({
+        buildId: String(data.buildId || data.version || ''),
+        version: String(data.version || data.buildId || ''),
+        notes: Array.isArray(data.notes) ? data.notes : [],
+        builtAt: data.builtAt || null,
+      });
+    }
+  } catch (err) {
+    console.error('app-version read error:', err?.message || err);
+  }
+  return res.json({ buildId: 'dev', version: 'dev', notes: [], builtAt: null });
+});
+
 app.get('/api/music/toplist/netease', async (req, res) => {
-  if (!limitProxyRequest(`toplist:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('toplist', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
   const limit = parseInt(String(req.query.limit || ''), 10);
@@ -518,7 +587,8 @@ app.get('/api/music/toplist/netease', async (req, res) => {
 });
 
 app.get('/api/music/netease/playlists/meta', async (req, res) => {
-  if (!limitProxyRequest(`playlist-meta:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('playlist-meta', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -542,7 +612,8 @@ app.get('/api/music/netease/playlists/meta', async (req, res) => {
 });
 
 app.get('/api/music/netease/playlists/search', async (req, res) => {
-  if (!limitProxyRequest(`playlist-search:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('playlist-search', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -610,7 +681,8 @@ app.get('/api/music/sources', (_req, res) => {
 });
 
 app.get('/api/meting', async (req, res) => {
-  if (!limitProxyRequest(`meting:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('meting', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -627,7 +699,8 @@ app.get('/api/meting', async (req, res) => {
 
 /** HTTPS 站点下代理 http 音频/封面，避免浏览器混合内容警告 */
 app.get('/api/media-proxy', async (req, res) => {
-  if (!limitProxyRequest(`media:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('media', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -645,8 +718,16 @@ app.get('/api/media-proxy', async (req, res) => {
     return res.status(400).json({ error: '不支持的协议' });
   }
 
-  if (isPrivateHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
+  const metingHost = getMetingApiHostname();
+  const extraHosts = metingHost ? [metingHost] : [];
+  const hostAllowed =
+    isMetingApiHostname(parsed.hostname)
+    || isAllowedMediaHostname(parsed.hostname, extraHosts);
+  if (isBlockedMediaHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
     return res.status(403).json({ error: '禁止访问内网地址' });
+  }
+  if (!hostAllowed) {
+    return res.status(403).json({ error: '不允许的媒体域名' });
   }
 
   try {
@@ -658,9 +739,21 @@ app.get('/api/media-proxy', async (req, res) => {
       fetchUrl = raw;
     }
 
+    // 解析后的最终 URL 必须落在音乐 CDN 白名单（不再允许任意公网 / 内网 Meting）
+    let finalHost = '';
+    try {
+      finalHost = new URL(fetchUrl).hostname;
+    } catch {
+      return res.status(400).json({ error: '无效地址' });
+    }
+    if (isBlockedMediaHostname(finalHost) || !isAllowedMediaHostname(finalHost)) {
+      return res.status(403).json({ error: '不允许的媒体域名' });
+    }
+
     await serveUpstreamMedia(fetchUrl, res, fetchWithTimeout, {
       range: req.headers.range,
       thumbPx,
+      requireAllowlist: true,
     });
   } catch (err) {
     console.error('Media proxy error:', err.message);
@@ -670,7 +763,8 @@ app.get('/api/media-proxy', async (req, res) => {
 
 /** cyapi 蓝点音乐搜索 */
 app.get('/api/music/cyapi/kugou/search', async (req, res) => {
-  if (!limitProxyRequest(`kugou:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('kugou', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -693,7 +787,8 @@ app.get('/api/music/cyapi/kugou/search', async (req, res) => {
 
 /** 导入外部歌单（分享链接） */
 app.post('/api/music/playlist/import', async (req, res) => {
-  if (!limitProxyRequest(`playlist:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('playlist', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -717,7 +812,8 @@ app.post('/api/music/playlist/import', async (req, res) => {
 
 /** cyapi 蓝点音乐详情（播放链接、歌词） */
 app.get('/api/music/cyapi/kugou/song', async (req, res) => {
-  if (!limitProxyRequest(`kugou-song:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('kugou-song', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -740,7 +836,8 @@ app.get('/api/music/cyapi/kugou/song', async (req, res) => {
 
 /** 歌词备用：52vmy，按歌名搜索 */
 app.get('/api/music/lrc-fallback', async (req, res) => {
-  if (!limitProxyRequest(`lrc:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('lrc', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -765,7 +862,7 @@ app.get('/api/music/lrc-fallback', async (req, res) => {
 const IDENTITY_UID_COOKIE = 'openmusic_uid';
 const IDENTITY_TOKEN_COOKIE = 'openmusic_token';
 const DEVICE_ID_COOKIE = 'openmusic_did';
-const IDENTITY_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 365 * 5;
+const IDENTITY_COOKIE_MAX_AGE_SEC = SESSION_TTL_SEC;
 
 function parseCookieHeader(header) {
   const out = {};
@@ -791,22 +888,44 @@ function sanitizeClientId(value) {
   return /^[a-zA-Z0-9_-]{8,64}$/.test(id) ? id : '';
 }
 
-function signClientId(clientId) {
-  return createHmac('sha256', CLIENT_ID_SECRET).update(clientId).digest('base64url');
+/** 签名格式：`iat.hmac(userId.iat)`，带过期时间 */
+function signClientId(clientId, iat = Math.floor(Date.now() / 1000)) {
+  const issuedAt = Math.floor(Number(iat) || Date.now() / 1000);
+  const payload = `${clientId}.${issuedAt}`;
+  const sig = createHmac('sha256', CLIENT_ID_SECRET).update(payload).digest('base64url');
+  return `${issuedAt}.${sig}`;
 }
 
+/**
+ * @returns {{ userId: string, iat: number, expiresAt: number } | null}
+ */
 function verifyClientToken(clientId, token) {
   const id = sanitizeClientId(clientId);
   const rawToken = String(token || '').trim();
-  if (!id || !rawToken) return false;
+  if (!id || !rawToken) return null;
+
+  const dot = rawToken.indexOf('.');
+  if (dot <= 0) return null;
+
+  const iat = Number(rawToken.slice(0, dot));
+  const sig = rawToken.slice(dot + 1);
+  if (!Number.isFinite(iat) || iat <= 0 || !sig) return null;
 
   try {
-    const expected = Buffer.from(signClientId(id));
-    const actual = Buffer.from(rawToken);
-    return expected.length === actual.length && timingSafeEqual(expected, actual);
+    const expected = Buffer.from(
+      createHmac('sha256', CLIENT_ID_SECRET).update(`${id}.${iat}`).digest('base64url'),
+    );
+    const actual = Buffer.from(sig);
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
   } catch {
-    return false;
+    return null;
   }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (iat > now + 60) return null;
+  if (now - iat > SESSION_TTL_SEC) return null;
+
+  return { userId: id, iat, expiresAt: iat + SESSION_TTL_SEC };
 }
 
 function createServerClientId() {
@@ -827,56 +946,72 @@ function setIdentityCookieHeaders(res, userId, token, deviceId = null) {
   res.setHeader('Set-Cookie', cookies);
 }
 
-function resolveDeviceIdFromRequest(req) {
-  const cookies = parseCookieHeader(req.headers?.cookie || '');
-  const fromCookie = sanitizeDeviceId(cookies[DEVICE_ID_COOKIE]);
-  const fromBody = sanitizeDeviceId(req.body?.deviceId);
-  return fromCookie || fromBody || null;
-}
-
+/** 仅读取 HttpOnly 设备 Cookie（不可用 body/localStorage 冒充恢复） */
 function resolveDeviceIdFromCookieHeader(cookieHeader) {
   const cookies = parseCookieHeader(cookieHeader || '');
   return sanitizeDeviceId(cookies[DEVICE_ID_COOKIE]);
+}
+
+function resolveBodyDeviceId(req) {
+  return sanitizeDeviceId(req.body?.deviceId);
 }
 
 function resolveIdentityFromCookies(cookieHeader) {
   const cookies = parseCookieHeader(cookieHeader);
   const userId = sanitizeClientId(cookies[IDENTITY_UID_COOKIE]);
   const token = String(cookies[IDENTITY_TOKEN_COOKIE] || '').trim();
-  if (userId && verifyClientToken(userId, token)) {
-    return { userId, token };
-  }
-  return null;
+  return verifyClientToken(userId, token);
 }
 
 function resolveIdentityFromRequest(req) {
   return resolveIdentityFromCookies(req.headers?.cookie || '');
 }
 
+function requireSessionIdentity(req, res) {
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+    return null;
+  }
+  return identity;
+}
+
+function proxyLimitKey(kind, req) {
+  const identity = resolveIdentityFromRequest(req);
+  return `${kind}:${getRequestIp(req)}:${identity?.userId || 'anon'}`;
+}
+
 /** 建立 HttpOnly 会话：身份凭证仅通过 Cookie 传递，不经 WebSocket 明文下发 */
 app.post('/api/session/bootstrap', async (req, res) => {
-  const hintedDeviceId = resolveDeviceIdFromRequest(req);
+  const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  const bodyDeviceId = resolveBodyDeviceId(req);
+  const now = Math.floor(Date.now() / 1000);
 
   const existing = resolveIdentityFromRequest(req);
   if (existing) {
-    const deviceId = hintedDeviceId || createServerClientId();
+    // 已认证：可用 body deviceId 对齐绑定；恢复路径不依赖 body
+    const deviceId = cookieDeviceId || bodyDeviceId || createServerClientId();
     await linkDeviceToUser(deviceId, existing.userId);
-    setIdentityCookieHeaders(res, existing.userId, signClientId(existing.userId), deviceId);
+    const shouldRenew = existing.expiresAt - now <= SESSION_RENEW_WITHIN_SEC;
+    const token = shouldRenew
+      ? signClientId(existing.userId)
+      : signClientId(existing.userId, existing.iat);
+    setIdentityCookieHeaders(res, existing.userId, token, deviceId);
     return res.json({ clientId: existing.userId });
   }
 
-  // 无身份 Cookie 时，仅允许通过已登记的本机设备 ID 恢复同一 userId（不可指定任意 userId）
-  if (hintedDeviceId) {
-    const boundUserId = await getUserIdForDevice(hintedDeviceId);
+  // 无身份 Cookie：仅允许 HttpOnly openmusic_did 恢复同一 userId
+  if (cookieDeviceId) {
+    const boundUserId = await getUserIdForDevice(cookieDeviceId);
     if (boundUserId) {
-      await linkDeviceToUser(hintedDeviceId, boundUserId);
-      setIdentityCookieHeaders(res, boundUserId, signClientId(boundUserId), hintedDeviceId);
+      await linkDeviceToUser(cookieDeviceId, boundUserId);
+      setIdentityCookieHeaders(res, boundUserId, signClientId(boundUserId), cookieDeviceId);
       return res.json({ clientId: boundUserId });
     }
   }
 
   const userId = createServerClientId();
-  const deviceId = hintedDeviceId || createServerClientId();
+  const deviceId = cookieDeviceId || createServerClientId();
   await linkDeviceToUser(deviceId, userId);
   setIdentityCookieHeaders(res, userId, signClientId(userId), deviceId);
   return res.json({ clientId: userId });
@@ -920,7 +1055,8 @@ app.get('/api/chat/sticker-search', async (req, res) => {
     return res.status(503).json({ error: '未配置表情包搜索' });
   }
 
-  if (!limitProxyRequest(`sticker-search:${getRequestIp(req)}`)) {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitProxyRequest(proxyLimitKey('sticker-search', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
@@ -980,8 +1116,6 @@ app.post('/api/chat/upload-token', (req, res) => {
   }
 });
 
-const clientDist = path.join(__dirname, '../client/dist');
-
 function resolveAndroidApkPath() {
   const candidates = [
     path.join(__dirname, 'downloads/openmusic.apk'),
@@ -1030,7 +1164,10 @@ function sendIosIpa(req, res) {
 app.get('/downloads/openmusic.apk', sendAndroidApk);
 app.get('/downloads/openmusic.ipa', sendIosIpa);
 
-mountWechatFileHelperProxy(app, fetchWithTimeout);
+mountWechatFileHelperProxy(app, fetchWithTimeout, {
+  requireAuth: (req, res) => Boolean(requireSessionIdentity(req, res)),
+  secureCookies: IS_PRODUCTION,
+});
 
 app.get('/robots.txt', (req, res) => {
   const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS);
@@ -1080,14 +1217,11 @@ const socketToRoom = new Map();
 const socketToUserId = new Map();
 
 function isPrivateHostname(hostname) {
-  const host = String(hostname || '').toLowerCase();
-  if (!host || host === 'localhost') return true;
-  if (host.endsWith('.local')) return true;
-  return isPrivateIp(host);
+  return isBlockedMediaHostname(hostname);
 }
 
 function getSocketUserId(socket) {
-  return socketToUserId.get(socket.id) || socket.id;
+  return socketToUserId.get(socket.id) || null;
 }
 
 function rejectReadOnly(socket, callback) {
@@ -1097,7 +1231,13 @@ function rejectReadOnly(socket, callback) {
     return true;
   }
 
-  if (!canUserMutate(roomId, getSocketUserId(socket))) {
+  const userId = getSocketUserId(socket);
+  if (!userId) {
+    callback?.({ success: false, error: '会话无效，请刷新后重试' });
+    return true;
+  }
+
+  if (!canUserMutate(roomId, userId)) {
     callback?.({ success: false, error: '只读端无法执行此操作' });
     return true;
   }
@@ -1269,8 +1409,9 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
 
   const beforeQueueId = internal.current.queueId;
   const beforePosition = getPlaybackTime(internal);
+  // 禁止客户端 force：否则任意成员可凭 queueId 跳过「是否播完」检查强制切歌
   const advanced = await advancePlaybackIfEnded(roomId, {
-    force: Boolean(expectedQueueId),
+    force: false,
     expectedQueueId,
   });
   if (!advanced) return null;
@@ -1312,6 +1453,10 @@ io.on('connection', (socket) => {
 
     const auth = verifyRoomPassword(id, password, { clientId: userId });
     if (!auth.ok) {
+      if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
+        callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
+        return;
+      }
       callback?.({ success: false, error: auth.error, needsPassword: auth.needsPassword });
       return;
     }
@@ -1329,12 +1474,14 @@ io.on('connection', (socket) => {
 
     const prevRoomId = socketToRoom.get(socket.id);
     const prevUserId = getSocketUserId(socket);
-    if (prevRoomId && prevRoomId !== id) {
+    if (prevRoomId && prevRoomId !== id && prevUserId) {
       socket.leave(prevRoomId);
       const prevResult = removeUser(prevRoomId, prevUserId, socket.id);
       if (prevResult?.userRemoved && !prevResult.empty) {
         broadcastRoomUpdate(prevRoomId);
       }
+    } else if (prevRoomId && prevRoomId !== id) {
+      socket.leave(prevRoomId);
     }
 
     // 同一连接再次加入同一房间，但解析出的用户身份不同（如身份令牌尚未持久化、
@@ -1397,7 +1544,9 @@ io.on('connection', (socket) => {
         || String(nickname || '').trim(),
       isOwner: roomPayload.creatorId === userId,
       isAdmin: (roomPayload.adminIds || []).includes(userId),
-      canControlPlayback: roomPayload.creatorId === userId || (roomPayload.adminIds || []).includes(userId),
+      canControlPlayback: roomPayload.creatorId === userId
+        || (roomPayload.adminIds || []).includes(userId)
+        || (roomPayload.autoPromotedAdminIds || []).includes(userId),
       isPlaybackLeader: roomPayload.ownerId === userId,
     });
 
@@ -1516,6 +1665,31 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
+  socket.on('set_room_chat_history', ({ enabled }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_chat_history', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setChatHistoryVisibleOnJoin(
+      roomId,
+      getSocketUserId(socket),
+      enabled,
+      socket.id,
+    );
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
   socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
@@ -1560,7 +1734,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = banRoomSong(roomId, getSocketUserId(socket), song);
+    const result = banRoomSong(roomId, getSocketUserId(socket), song, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -1580,7 +1754,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = unbanRoomSong(roomId, getSocketUserId(socket), name);
+    const result = unbanRoomSong(roomId, getSocketUserId(socket), name, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -1780,9 +1954,11 @@ io.on('connection', (socket) => {
     socketToRoom.delete(socket.id);
     const userId = getSocketUserId(socket);
     socketToUserId.delete(socket.id);
-    const result = removeUser(roomId, userId, socket.id);
-    if (result?.userRemoved && !result.empty) {
-      broadcastRoomUpdate(roomId);
+    if (userId) {
+      const result = removeUser(roomId, userId, socket.id);
+      if (result?.userRemoved && !result.empty) {
+        broadcastRoomUpdate(roomId);
+      }
     }
     callback?.({ success: true });
   });
@@ -1884,6 +2060,7 @@ io.on('connection', (socket) => {
 
   socket.on('finish_song', async ({ queueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'finish_song', callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
@@ -2149,6 +2326,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('recall_chat', ({ messageId }, callback) => {
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = recallChatMessage(roomId, getSocketUserId(socket), messageId, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    callback?.({ success: true });
+    if (result.recalledMessageId) {
+      io.to(roomId).emit('chat_message_recall', { messageId: result.recalledMessageId });
+    }
+    if (result.recallMessage) {
+      io.to(roomId).emit('chat_message', result.recallMessage);
+    }
+  });
+
   socket.on('toggle_chat_reaction', ({ messageId, emoji }, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
@@ -2332,6 +2531,7 @@ io.on('connection', (socket) => {
     const userId = getSocketUserId(socket);
     socketToRoom.delete(socket.id);
     socketToUserId.delete(socket.id);
+    if (!userId) return;
 
     setTimeout(() => {
       const result = removeUser(roomId, userId, socket.id);

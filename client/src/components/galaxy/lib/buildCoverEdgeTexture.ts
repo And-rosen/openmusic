@@ -7,7 +7,7 @@ export function buildCoverEdgeTexture(source: CanvasImageSource): HTMLCanvasElem
   const normalized = document.createElement('canvas');
   normalized.width = W;
   normalized.height = H;
-  const sctx = normalized.getContext('2d');
+  const sctx = normalized.getContext('2d', { willReadFrequently: true });
   if (!sctx) return normalized;
   sctx.drawImage(source, 0, 0, W, H);
 

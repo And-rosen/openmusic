@@ -49,6 +49,9 @@ export function mergeRoomState(incoming: RoomState, current: RoomState | null): 
   if (stringArraysEqual(incoming.adminIds, current.adminIds)) {
     merged.adminIds = current.adminIds;
   }
+  if (stringArraysEqual(incoming.autoPromotedAdminIds, current.autoPromotedAdminIds)) {
+    merged.autoPromotedAdminIds = current.autoPromotedAdminIds;
+  }
   if (stringArraysEqual(incoming.mutedUserIds, current.mutedUserIds)) {
     merged.mutedUserIds = current.mutedUserIds;
   }

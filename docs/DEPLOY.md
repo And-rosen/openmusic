@@ -35,14 +35,23 @@ docker run -d --name meting -p 3000:3000 w3126197382/meting-api:latest
 |------|:----:|------|
 | `PORT` | | 服务端口，默认 `4000` |
 | `NODE_ENV` | 生产推荐 | 设为 `production` |
-| `CLIENT_URL` | 生产必填 | 允许的前端 Origin，多个用英文逗号分隔 |
+| `CLIENT_URL` | 生产必填 | 允许的前端 Origin，多个用英文逗号分隔（必须 https） |
 | `CLIENT_ID_SECRET` | 生产必填 | 浏览器会话签名密钥，**重启后不要变化** |
+| `SESSION_TTL_SEC` | | 会话有效期（秒），默认 90 天；bootstrap 临近过期会静默续签 |
+| `TRUST_PROXY` | 生产推荐 | 设为 `1`：用 Nginx 的 `X-Real-IP` 做限流，勿信客户端伪造的 XFF |
 | `METING_API_URL` | 必填 | Meting-API 地址 |
 | `METING_API_AUTH` | 推荐 | Meting 的 `auth` 令牌 |
 | `CYAPI_KEY` | 可选 | 迟言 API Key（蓝点 + 随机推荐） |
 | `CYAPI_BASE` | 可选 | 迟言 API 根地址，默认 `https://cyapi.top/API` |
 | `REDIS_URL` | 可选 | Redis 连接串 |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` 等 | 可选 | 与 `REDIS_URL` 二选一 |
+
+### 传输安全说明
+
+- **加密依赖 HTTPS/TLS**（由 Nginx 终止）。不要在业务层再套一层请求体加密：徒增 CPU，且密钥分发难，收益低于正确配置 TLS。
+- Node 进程只监听本机 HTTP；浏览器应始终走 `https://` / `wss://`。
+- 身份为 HttpOnly Cookie + HMAC（带签发时间）；设备恢复仅认 HttpOnly `openmusic_did`，localStorage 中的 deviceId **不能**单独领回账号。
+- `/api/media-proxy` 等开放代理需有效会话，且仅允许音乐 CDN 域名，并手动校验重定向以防 SSRF。
 
 ### 生产最小配置（仅红点）
 
@@ -51,6 +60,7 @@ PORT=4000
 NODE_ENV=production
 CLIENT_URL=https://music.example.com
 CLIENT_ID_SECRET=换成一段长随机字符串
+TRUST_PROXY=1
 METING_API_URL=http://127.0.0.1:3000
 METING_API_AUTH=你的meting_token
 ```
@@ -62,6 +72,7 @@ PORT=4000
 NODE_ENV=production
 CLIENT_URL=https://your-domain.com
 CLIENT_ID_SECRET=换成一段长随机字符串
+TRUST_PROXY=1
 METING_API_URL=http://127.0.0.1:3000
 METING_API_AUTH=你的meting_token
 CYAPI_KEY=你的迟言apikey
@@ -93,8 +104,22 @@ npm start
 
 | 命令 | 说明 |
 |------|------|
-| `npm run build` | 构建前端 → `client/dist` |
-| `npm run package:build` | 组装 `release/openmusic-build.zip` |
+| `npm run build` | 构建前端 → `client/dist`（写入 `version.json`，资源带 hash） |
+| `npm run package:build` | 录入更新说明后组装 `release/openmusic-build.zip` |
+
+### 发版与更新提示
+
+1. 编辑根目录 [`release-notes.json`](../release-notes.json)，或执行 `npm run package:build` 时按提示逐行输入更新内容。
+2. 构建会生成 `client/dist/version.json`（`buildId` + `notes`），并注入到前端。
+3. 用户打开站点后会轮询 `GET /api/app-version`（走 API、禁止缓存）；发现新版本弹窗提示「立即更新」强制刷新。
+4. **EdgeOne / CDN**：请对 `/api/*` 动态回源；`index.html` 不要长期缓存。资源已带 content hash，发版后旧 JS 不会被当成新文件。发版后建议在 EdgeOne 刷新一次 HTML。
+
+也可非交互打包：
+
+```bash
+# Windows PowerShell
+$env:RELEASE_NOTES="修复播放同步;聊天撤回优化"; npm run package:build
+```
 
 ### 宝塔 / PM2
 
@@ -131,6 +156,7 @@ location /socket.io/ {
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/app-version` | 前端版本与更新说明（no-store） |
 | `GET` | `/api/rooms` | 房间列表 |
 | `POST` | `/api/rooms` | 创建房间 |
 | `GET` | `/api/music/toplist/netease` | 网易云热歌榜 |

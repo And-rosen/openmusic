@@ -38,10 +38,12 @@ interface Props {
   nickname: string;
   pureMode: boolean;
   chatMuted: boolean;
+  canModerate?: boolean;
   chatPanelRef: React.RefObject<HTMLDivElement | null>;
   reactionPickerMessageId: string | null;
   onReactionPickerChange: (messageId: string | null) => void;
   onReply: (msg: ChatMessage) => void;
+  onRecall?: (msg: ChatMessage) => void;
   onMentionUser: (user: RoomUser) => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onPreviewImage: (url: string) => void;
@@ -65,11 +67,13 @@ type VirtualRowData = {
   myUserId: string;
   pureMode: boolean;
   chatMuted: boolean;
+  canModerate?: boolean;
   chatScrollRoot: HTMLDivElement | null;
   chatPanelRef: React.RefObject<HTMLDivElement | null>;
   reactionPickerMessageId: string | null;
   revealedPureImages: Set<string>;
   onReply: (msg: ChatMessage) => void;
+  onRecall?: (msg: ChatMessage) => void;
   onMentionUser: (user: RoomUser) => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onReactionPickerChange: (messageId: string | null) => void;
@@ -80,6 +84,7 @@ type VirtualRowData = {
 
 function estimateMessageHeight(msg: ChatMessage): number {
   if (msg.kind === 'welcome') return 120;
+  if (msg.kind === 'recall') return 36;
   // 头像行 + 昵称行余量（宁可偏高出现空隙，也不要偏低导致重叠）
   let height = 56;
   if (msg.replyTo) height += 44;
@@ -129,9 +134,11 @@ function VirtualChatRow({ index, style, data }: ListChildComponentProps<VirtualR
           pureImageRevealed={data.revealedPureImages.has(msg.id)}
           reactionPickerOpen={data.reactionPickerMessageId === msg.id}
           chatMuted={data.chatMuted}
+          canModerate={data.canModerate}
           chatScrollRoot={data.chatScrollRoot}
           chatPanelRef={data.chatPanelRef}
           onReply={data.onReply}
+          onRecall={data.onRecall}
           onMentionUser={data.onMentionUser}
           onToggleReaction={data.onToggleReaction}
           onOpenReactionPicker={data.onReactionPickerChange}
@@ -151,10 +158,12 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   nickname,
   pureMode,
   chatMuted,
+  canModerate = false,
   chatPanelRef,
   reactionPickerMessageId,
   onReactionPickerChange,
   onReply,
+  onRecall,
   onMentionUser,
   onToggleReaction,
   onPreviewImage,
@@ -575,11 +584,13 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     myUserId,
     pureMode,
     chatMuted,
+    canModerate,
     chatScrollRoot,
     chatPanelRef,
     reactionPickerMessageId,
     revealedPureImages,
     onReply,
+    onRecall,
     onMentionUser,
     onToggleReaction,
     onReactionPickerChange,
@@ -592,11 +603,13 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     myUserId,
     pureMode,
     chatMuted,
+    canModerate,
     chatScrollRoot,
     chatPanelRef,
     reactionPickerMessageId,
     revealedPureImages,
     onReply,
+    onRecall,
     onMentionUser,
     onToggleReaction,
     onReactionPickerChange,
@@ -620,9 +633,11 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
           pureImageRevealed={revealedPureImages.has(msg.id)}
           reactionPickerOpen={reactionPickerMessageId === msg.id}
           chatMuted={chatMuted}
+          canModerate={canModerate}
           chatScrollRoot={chatScrollRoot}
           chatPanelRef={chatPanelRef}
           onReply={onReply}
+          onRecall={onRecall}
           onMentionUser={onMentionUser}
           onToggleReaction={onToggleReaction}
           onOpenReactionPicker={onReactionPickerChange}

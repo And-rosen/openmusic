@@ -42,6 +42,7 @@ function SongResultList({
   const { queueKeys, playedKeys } = useRoomSongKeySets();
   const { favoriteIds } = useFavorites();
   const onAddRef = useRef(onAdd);
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
   onAddRef.current = onAdd;
 
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
@@ -59,6 +60,10 @@ function SongResultList({
   useEffect(() => {
     onPageResultsChange?.(pageResults);
   }, [pageResults, onPageResultsChange]);
+
+  useEffect(() => {
+    scrollBodyRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [page]);
 
   // 翻页 / 换关键词 / 卸载时停掉试听，避免后台继续播
   useEffect(() => {
@@ -82,7 +87,7 @@ function SongResultList({
       className={`flex min-h-0 flex-col ${fillHeight ? 'h-full' : ''}`}
       style={fillHeight ? undefined : { height: RESULT_BODY_HEIGHT }}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-0.5">
+      <div ref={scrollBodyRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-0.5">
         <div className="space-y-2">
           {pageResults.map((song) => {
             const key = songKey(song);

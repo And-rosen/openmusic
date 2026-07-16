@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { filterDisplayLyrics } from '../api/music';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { filterDisplayLyrics, LYRIC_SYNC_LEAD_SEC } from '../api/music';
 import { findActiveLyricIndex } from '../lib/lyricActiveIndex';
 import type { LyricLine } from '../types';
 
@@ -33,6 +33,8 @@ function Lyrics({
   const [manualScroll, setManualScroll] = useState(false);
   const scrollTimer = useRef<ReturnType<typeof setTimeout>>();
   const lastActiveIndexRef = useRef(-1);
+  const programmaticScrollRef = useRef(false);
+  const needsInstantSnapRef = useRef(true);
 
   const displayLines = useMemo(() => filterDisplayLyrics(lines), [lines]);
   const isSide = variant === 'side';
@@ -41,7 +43,7 @@ function Lyrics({
   const shouldAutoScroll = fullScroll || !isSide;
 
   const activeIndex = useMemo(
-    () => findActiveLyricIndex(displayLines, currentTime),
+    () => findActiveLyricIndex(displayLines, currentTime + LYRIC_SYNC_LEAD_SEC),
     [displayLines, currentTime],
   );
 
@@ -71,24 +73,49 @@ function Lyrics({
       + (activeRect.top - containerRect.top)
       - container.clientHeight / 2
       + activeRect.height / 2;
+    const top = Math.max(0, nextTop);
+    if (Math.abs(container.scrollTop - top) < 1) return;
 
-    container.scrollTo({ top: Math.max(0, nextTop), behavior });
+    programmaticScrollRef.current = true;
+    container.scrollTo({ top, behavior });
+    if (behavior === 'instant') {
+      // instant 同步完成，下一帧再放开 scroll 监听
+      requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+      });
+      return;
+    }
+    // smooth 期间忽略 scroll 事件，避免误判为手动滚动
+    window.setTimeout(() => {
+      programmaticScrollRef.current = false;
+    }, 450);
   }, []);
 
   useEffect(() => {
     setManualScroll(false);
     lastActiveIndexRef.current = -1;
+    needsInstantSnapRef.current = true;
   }, [lines]);
+
+  // 首次进入 / 换歌：布局后立刻对齐，避免看到滚动条动画
+  useLayoutEffect(() => {
+    if (!shouldAutoScroll || activeIndex < 0) return;
+    if (!needsInstantSnapRef.current) return;
+    needsInstantSnapRef.current = false;
+    lastActiveIndexRef.current = activeIndex;
+    scrollActiveToCenter('instant');
+  }, [activeIndex, displayLines, scrollActiveToCenter, shouldAutoScroll]);
 
   useEffect(() => {
     if (!shouldAutoScroll || manualScroll || activeIndex < 0) return;
     if (activeIndex === lastActiveIndexRef.current) return;
     lastActiveIndexRef.current = activeIndex;
-    scrollActiveToCenter(instantScroll ? 'instant' : 'smooth');
+    scrollActiveToCenter(instantScroll || needsInstantSnapRef.current ? 'instant' : 'smooth');
   }, [activeIndex, instantScroll, manualScroll, shouldAutoScroll, scrollActiveToCenter]);
 
   const handleScroll = () => {
     if (!shouldAutoScroll) return;
+    if (programmaticScrollRef.current) return;
     setManualScroll(true);
     clearTimeout(scrollTimer.current);
     scrollTimer.current = setTimeout(() => setManualScroll(false), SCROLL_IDLE_MS);

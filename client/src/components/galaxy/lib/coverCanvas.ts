@@ -15,7 +15,8 @@ export function makeSquareCoverCanvas(
 ): HTMLCanvasElement {
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
-  const cx = cv.getContext('2d');
+  // 后续会 sampleCoverAccentColor / 粒子取色 getImageData
+  const cx = cv.getContext('2d', { willReadFrequently: true });
   if (!cx) return cv;
 
   if (img instanceof HTMLImageElement) {
@@ -41,7 +42,7 @@ export function visualEase(t: number): number {
 
 /** 从封面画布采样主色（对齐 Mineradio 封面取色） */
 export function sampleCoverAccentColor(cv: HTMLCanvasElement): string {
-  const ctx = cv.getContext('2d');
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
   if (!ctx) return '#9db8cf';
   const w = cv.width;
   const h = cv.height;
@@ -71,32 +72,29 @@ export function sampleCoverAccentColor(cv: HTMLCanvasElement): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-/** 切歌时把当前深度图写入 prevEdgeTex */
-export function snapshotEdgeToPrevTexture(
+/** 切歌时复制当前深度图，返回独立 canvas（尺寸变化时勿原地改 THREE.Texture.image） */
+export function cloneEdgeCanvas(
   currentEdge: HTMLCanvasElement | null | undefined,
-  prevTex: { image: unknown; needsUpdate: boolean },
-): void {
-  if (!currentEdge || currentEdge.width < 2) return;
+): HTMLCanvasElement | null {
+  if (!currentEdge || currentEdge.width < 2) return null;
   const prevCv = document.createElement('canvas');
   prevCv.width = currentEdge.width;
   prevCv.height = currentEdge.height;
   const pctx = prevCv.getContext('2d');
-  if (!pctx) return;
+  if (!pctx) return null;
   try {
     pctx.drawImage(currentEdge, 0, 0);
-    prevTex.image = prevCv;
-    prevTex.needsUpdate = true;
+    return prevCv;
   } catch {
-    // ignore
+    return null;
   }
 }
 
-/** 切歌时把当前封面写入 prevCoverTex（对齐 Mineradio applyCoverCanvas） */
-export function snapshotCoverToPrevTexture(
+/** 切歌时复制当前封面，返回独立 canvas */
+export function cloneCoverCanvas(
   currentImage: CanvasImageSource | null | undefined,
-  prevTex: { image: unknown; needsUpdate: boolean },
-): void {
-  if (!currentImage) return;
+): HTMLCanvasElement | null {
+  if (!currentImage) return null;
   const prevW =
     currentImage instanceof HTMLImageElement
       ? currentImage.naturalWidth || currentImage.width
@@ -114,12 +112,11 @@ export function snapshotCoverToPrevTexture(
   prevCv.width = Math.max(1, Math.round(prevW * prevScale));
   prevCv.height = Math.max(1, Math.round(prevH * prevScale));
   const pctx = prevCv.getContext('2d');
-  if (!pctx) return;
+  if (!pctx) return null;
   try {
     pctx.drawImage(currentImage, 0, 0, prevCv.width, prevCv.height);
-    prevTex.image = prevCv;
-    prevTex.needsUpdate = true;
+    return prevCv;
   } catch {
-    // ignore tainted canvas
+    return null;
   }
 }

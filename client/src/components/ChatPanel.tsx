@@ -25,8 +25,11 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
   const roomMeta = useChatRoomMeta();
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
+  const isOwner = useRoomStore((s) => s.isOwner);
+  const isAdmin = useRoomStore((s) => s.isAdmin);
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
-  const { sendChat, setChatMute, loadChatHistory, toggleChatReaction } = useSocket();
+  const canModerate = isOwner || isAdmin;
+  const { sendChat, recallChat, setChatMute, loadChatHistory, toggleChatReaction } = useSocket();
 
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
@@ -106,6 +109,13 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
     }
   }, [toggleChatReaction]);
 
+  const handleRecall = useCallback(async (msg: ChatMessage) => {
+    const res = await recallChat(msg.id);
+    if (!res.success && res.error) {
+      setMuteError(res.error);
+    }
+  }, [recallChat]);
+
   const handlePendingImageChange = useCallback((image: PendingChatImage | null) => {
     setPendingImage((current) => {
       if (current?.previewUrl && current.previewUrl !== image?.previewUrl) {
@@ -177,7 +187,14 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
   ) : null;
 
   return (
-    <div ref={chatPanelRef} className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 ${className}`}>
+    <div
+      ref={chatPanelRef}
+      className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 ${className}`}
+      onContextMenu={(event) => {
+        // 空白区域：禁用浏览器默认菜单；消息体自行 stopPropagation 并弹出自定义菜单
+        event.preventDefault();
+      }}
+    >
       <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-netease-border/50 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <MessageCircle className="h-4 w-4 text-netease-muted" />
@@ -186,7 +203,7 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
             <span className="rounded-full bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-400/90">全体禁言</span>
           )}
         </div>
-        {canControlPlayback && (
+        {canModerate && (
           <Tooltip side="bottom" content="禁言管理">
             <button
               type="button"
@@ -214,10 +231,12 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
           nickname={nickname}
           pureMode={pureMode}
           chatMuted={chatMuted}
+          canModerate={canModerate}
           chatPanelRef={chatPanelRef}
           reactionPickerMessageId={reactionPickerMessageId}
           onReactionPickerChange={setReactionPickerMessageId}
           onReply={handleReply}
+          onRecall={handleRecall}
           onMentionUser={handleMentionUser}
           onToggleReaction={handleToggleReaction}
           onPreviewImage={setPreviewImageUrl}

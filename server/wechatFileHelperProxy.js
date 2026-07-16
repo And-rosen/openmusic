@@ -33,22 +33,10 @@ function applyNoCacheHeaders(res) {
   res.set('Surrogate-Control', 'no-store');
 }
 
-function isPrivateIp(host) {
-  const parts = String(host || '').split('.').map((n) => Number(n));
-  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return true;
-  if (parts[0] === 10) return true;
-  if (parts[0] === 127) return true;
-  if (parts[0] === 192 && parts[1] === 168) return true;
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-  return false;
-}
-
 function isAllowedTarget(url) {
-  const host = url.hostname;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
-    if (isPrivateIp(host)) return false;
-    return url.pathname.startsWith('/mmtls/');
-  }
+  const host = String(url.hostname || '').toLowerCase();
+  // 禁止公网 IP 开放代理；仅允许腾讯系域名后缀
+  if (!host || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) return false;
   return host === 'qq.com' || host.endsWith('.qq.com');
 }
 
@@ -211,20 +199,21 @@ function rewriteQqUrls(body) {
     });
 }
 
-function rewriteSetCookie(value) {
+function rewriteSetCookie(value, { secure = false } = {}) {
+  const paths = [WX_PROXY_MOUNT, WX_ROOT_CGI_MOUNT];
   return value
     .split(/,(?=[^;]+=)/)
-    .map((part) => {
+    .flatMap((part) => {
       const cookie = part
         .replace(/;\s*Domain=[^;]*/gi, '')
         .replace(/;\s*Secure/gi, '')
         .replace(/;\s*SameSite=None/gi, '; SameSite=Lax')
         .replace(/;\s*Path=[^;]*/gi, '')
         .trim();
-      return cookie ? `${cookie}; Path=/` : '';
-    })
-    .filter(Boolean)
-    .join(', ');
+      if (!cookie) return [];
+      const secureFlag = secure ? '; Secure' : '';
+      return paths.map((cookiePath) => `${cookie}; Path=${cookiePath}${secureFlag}`);
+    });
 }
 
 const WX_COOKIE_NAME = /^(wxuin|wxsid|wxloadtime|mm_lang|skey|_?wx|webwx|MM_)/i;
@@ -452,21 +441,27 @@ async function fetchUpstream(fetchWithTimeout, upstreamUrl, req, body) {
   return fetchWithTimeout(upstreamUrl, init, 60000);
 }
 
-function appendUpstreamSetCookies(res, upstream) {
+function appendUpstreamSetCookies(res, upstream, cookieOptions = {}) {
   const cookies = typeof upstream.headers.getSetCookie === 'function'
     ? upstream.headers.getSetCookie()
     : [];
   if (cookies.length > 0) {
     for (const cookie of cookies) {
-      res.append('Set-Cookie', rewriteSetCookie(cookie));
+      for (const rewritten of rewriteSetCookie(cookie, cookieOptions)) {
+        res.append('Set-Cookie', rewritten);
+      }
     }
     return;
   }
   const single = upstream.headers.get('set-cookie');
-  if (single) res.append('Set-Cookie', rewriteSetCookie(single));
+  if (single) {
+    for (const rewritten of rewriteSetCookie(single, cookieOptions)) {
+      res.append('Set-Cookie', rewritten);
+    }
+  }
 }
 
-async function forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, errorLabel) {
+async function forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, errorLabel, cookieOptions = {}) {
   const body = toForwardBodyBuffer(readForwardBody(req));
   const upstreamUrl = buildUpstreamUrl(req, targetUrl);
   const upstreamTarget = new URL(upstreamUrl);
@@ -505,7 +500,7 @@ async function forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, errorLab
     }
     res.set(key, value);
   });
-  appendUpstreamSetCookies(res, upstream);
+  appendUpstreamSetCookies(res, upstream, cookieOptions);
 
   res.set('X-OpenMusic-WxProxy', '1');
   if (isNoCacheWxEndpoint(upstreamTarget)) applyNoCacheHeaders(res);
@@ -521,13 +516,10 @@ async function forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, errorLab
     } catch {
       initRet = 'non-json';
     }
-    const cookie = headers.Cookie || '';
-    const cookieNames = cookie.split(';').map((c) => c.trim().split('=')[0]).filter(Boolean);
     console.info('[wx-proxy] webwxinit', {
       upstream: upstreamUrl,
       status: upstream.status,
       ret: initRet,
-      cookieNames,
       bodyLen: buffer.length,
     });
   }
@@ -541,7 +533,7 @@ async function forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, errorLab
   if (!res.headersSent) res.status(upstream.status).send(buffer);
 }
 
-function createWxIframeProxy(fetchWithTimeout) {
+function createWxIframeProxy(fetchWithTimeout, cookieOptions = {}) {
   return async function handleWxIframeProxy(req, res) {
     const targetUrl = parseProxyTarget(req);
     if (!targetUrl) {
@@ -551,23 +543,31 @@ function createWxIframeProxy(fetchWithTimeout) {
       return;
     }
 
-    await forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, '微信 iframe 代理失败');
+    await forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, '微信 iframe 代理失败', cookieOptions);
   };
 }
 
-function createWxRootCgiProxy(fetchWithTimeout) {
+function createWxRootCgiProxy(fetchWithTimeout, cookieOptions = {}) {
   return async function handleWxRootCgiProxy(req, res) {
     const upstreamUrl = buildFileHelperUpstreamUrl(req);
     const targetUrl = new URL(upstreamUrl);
-    await forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, '微信 CGI 代理失败');
+    await forwardWxUpstream(fetchWithTimeout, req, res, targetUrl, '微信 CGI 代理失败', cookieOptions);
   };
 }
 
-export function mountWechatFileHelperProxy(app, fetchWithTimeout) {
-  const handler = createWxIframeProxy(fetchWithTimeout);
-  const cgiHandler = createWxRootCgiProxy(fetchWithTimeout);
-  app.use(WX_PROXY_MOUNT, (req, res) => { void handler(req, res); });
-  app.use(WX_ROOT_CGI_MOUNT, (req, res) => { void cgiHandler(req, res); });
+export function mountWechatFileHelperProxy(app, fetchWithTimeout, options = {}) {
+  const requireAuth = typeof options.requireAuth === 'function' ? options.requireAuth : null;
+  const cookieOptions = { secure: Boolean(options.secureCookies) };
+  const handler = createWxIframeProxy(fetchWithTimeout, cookieOptions);
+  const cgiHandler = createWxRootCgiProxy(fetchWithTimeout, cookieOptions);
+
+  const wrap = (next) => (req, res) => {
+    if (requireAuth && !requireAuth(req, res)) return;
+    void next(req, res);
+  };
+
+  app.use(WX_PROXY_MOUNT, wrap(handler));
+  app.use(WX_ROOT_CGI_MOUNT, wrap(cgiHandler));
 }
 
 export { FILEHELPER_ORIGIN };

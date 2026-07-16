@@ -19,28 +19,49 @@ function statePositionSeconds(state: PlaybackState): number {
   return Number.isFinite(position) && position > 0 ? position : 0;
 }
 
+/** 仅用服务端时间戳推算快照时刻进度，避免 client/server 时钟偏差 */
+function positionSecAtServerSnapshot(state: PlaybackState): number {
+  const base = statePositionSeconds(state);
+  const startedAt = Number(state.startedAt);
+  const serverNowMs = Number(state.serverNowMs);
+  if (Number.isFinite(startedAt) && startedAt > 0 && Number.isFinite(serverNowMs) && serverNowMs > 0) {
+    return Math.max(0, (serverNowMs - startedAt) / 1000);
+  }
+  if (Number.isFinite(serverNowMs) && serverNowMs > 0) {
+    return base;
+  }
+  return base;
+}
+
+function deriveBasePositionSec(
+  state: PlaybackState,
+  receivedAt: number,
+  committedAt: number,
+): number {
+  if (state.status !== 'playing') {
+    return statePositionSeconds(state);
+  }
+  const atReceive = positionSecAtServerSnapshot(state);
+  const queueDelaySec = Math.max(0, (committedAt - receivedAt) / 1000);
+  return Math.max(0, atReceive + queueDelaySec);
+}
+
 /**
- * 播放进度：优先用服务端 startedAt 锚点（或 serverNowMs + positionSec），
- * 避免 pending snapshot 延迟刷入时把过期的 positionSec 当成「当前时刻」。
+ * 播放进度：在 commit 时用服务端自洽时间戳定锚，之后仅用本机单调时钟外推。
+ * 禁止 Date.now() - startedAt（client/server 时钟不一致时会跳秒，日志里常见 ~45s 固定偏差）。
  */
 export function getPlaybackTime(state: PlaybackState | null | undefined): number {
   if (!state) return 0;
   if (state.status !== 'playing') {
     return statePositionSeconds(state);
   }
-  const startedAt = Number(state.startedAt);
-  if (Number.isFinite(startedAt) && startedAt > 0) {
-    return Math.max(0, (Date.now() - startedAt) / 1000);
-  }
-  const serverNowMs = Number(state.serverNowMs);
-  if (Number.isFinite(serverNowMs) && serverNowMs > 0) {
-    const base = statePositionSeconds(state);
-    return Math.max(0, base + (Date.now() - serverNowMs) / 1000);
-  }
   const cached = state as Partial<ClientPlaybackState>;
   const base = cached.basePositionSec ?? statePositionSeconds(state);
-  const receivedAt = cached.receivedAt ?? cached.committedAt ?? Date.now();
-  return Math.max(0, base + (Date.now() - receivedAt) / 1000);
+  const anchor = cached.committedAt ?? cached.receivedAt ?? 0;
+  if (anchor > 0) {
+    return Math.max(0, base + (Date.now() - anchor) / 1000);
+  }
+  return positionSecAtServerSnapshot(state);
 }
 
 export function getClientPlaybackState(): ClientPlaybackState | null {
@@ -77,10 +98,11 @@ export function applyPlaybackState(
   if (state.version < clientState.localVersion) return false;
   const committedAt = timing?.committedAt ?? Date.now();
   const receivedAt = timing?.receivedAt ?? committedAt;
+  const basePositionSec = deriveBasePositionSec(state, receivedAt, committedAt);
   clientState.server = {
     ...state,
     positionSec: statePositionSeconds(state),
-    basePositionSec: statePositionSeconds(state),
+    basePositionSec,
     receivedAt,
     committedAt,
   };

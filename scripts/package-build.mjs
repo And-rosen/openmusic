@@ -1,7 +1,13 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import readline from 'readline';
 import { fileURLToPath } from 'url';
+import {
+  parseNotesFromEnv,
+  readReleaseNotesFile,
+  writeReleaseNotesFile,
+} from './app-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -33,6 +39,63 @@ function copyDir(src, dest) {
   }
 }
 
+function isInteractive() {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+function askLine(rl, question) {
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => resolve(String(answer || '').trim()));
+  });
+}
+
+/** 打包前录入更新说明，写入 release-notes.json 供构建注入 */
+async function collectReleaseNotes() {
+  if (process.env.RELEASE_NOTES) {
+    const notes = parseNotesFromEnv(process.env.RELEASE_NOTES);
+    writeReleaseNotesFile(notes);
+    return notes;
+  }
+
+  const existing = readReleaseNotesFile().notes;
+
+  if (!isInteractive() || process.env.RELEASE_NOTES_SKIP === '1') {
+    console.log('>>> 非交互环境，使用现有 release-notes.json');
+    return existing.length ? existing : writeReleaseNotesFile(['功能与体验优化']);
+  }
+
+  console.log('');
+  console.log('>>> 本次更新说明（用户刷新提示会展示）');
+  if (existing.length) {
+    console.log('当前 release-notes.json：');
+    existing.forEach((note, index) => console.log(`  ${index + 1}. ${note}`));
+  }
+  console.log('每行一条，空行结束；直接回车保留现有内容。');
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const notes = [];
+  try {
+    for (let i = 0; i < 12; i += 1) {
+      const line = await askLine(rl, `  ${i + 1}. `);
+      if (!line) break;
+      notes.push(line);
+    }
+  } finally {
+    rl.close();
+  }
+
+  if (notes.length === 0) {
+    console.log('>>> 未输入新说明，保留现有内容');
+    return existing.length ? existing : writeReleaseNotesFile(['功能与体验优化']);
+  }
+
+  writeReleaseNotesFile(notes);
+  console.log(`>>> 已写入 ${notes.length} 条更新说明`);
+  return notes;
+}
+
+await collectReleaseNotes();
+
 console.log('>>> 构建前端...');
 execSync('npm run build', { cwd: root, stdio: 'inherit' });
 
@@ -57,6 +120,11 @@ if (fs.existsSync(clientEnvExample)) {
 
 copyDir(path.join(root, 'deploy'), path.join(outDir, 'deploy'));
 
+const releaseNotesSrc = path.join(root, 'release-notes.json');
+if (fs.existsSync(releaseNotesSrc)) {
+  fs.copyFileSync(releaseNotesSrc, path.join(outDir, 'release-notes.json'));
+}
+
 fs.writeFileSync(
   path.join(outDir, 'README-DEPLOY.txt'),
   `OpenMusic 宝塔部署包
@@ -66,9 +134,12 @@ fs.writeFileSync(
 3. cp .env.example .env 并编辑配置（PORT、METING_API_URL、CLIENT_URL 填你的域名）
 4. npm install --production
 5. pm2 start ../deploy/ecosystem.config.cjs
-6. 宝塔 Nginx 参考 deploy/nginx.conf.example 配置反向代理
+6. 宝塔 Nginx 参考 deploy/nginx.conf.example（静态直出 + 仅 API/WS 反代）
 
-前端 SEO / sitemap 由服务端动态生成，无需额外配置。
+发版后若使用 EdgeOne：
+- 建议对 /api/*、/index.html、/version.json 关闭缓存或设为动态
+- 或发版后刷新 EdgeOne 缓存（至少刷新 HTML）
+- 前端资源已带 content hash，旧 JS 不会被误当成新版
 
 详细说明见 deploy/DEPLOY-BAOTA.md
 `,
@@ -84,6 +155,12 @@ if (process.platform === 'win32') {
   execSync(`powershell -NoProfile -Command "${ps}"`, { stdio: 'inherit' });
 } else {
   execSync(`cd "${outDir}" && zip -r "${archivePath}" .`, { stdio: 'inherit' });
+}
+
+const versionPath = path.join(outDir, 'client', 'dist', 'version.json');
+if (fs.existsSync(versionPath)) {
+  console.log('');
+  console.log('版本信息:', fs.readFileSync(versionPath, 'utf8').trim());
 }
 
 console.log('');

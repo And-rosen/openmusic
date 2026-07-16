@@ -200,6 +200,9 @@ export function filterDisplayLyrics(lines: import('../../types').LyricLine[]): i
   });
 }
 
+/** 歌词高亮相对播放时间略提前，减轻「歌词慢半拍」听感 */
+export const LYRIC_SYNC_LEAD_SEC = 0.28;
+
 export function getActiveLyricPair(
   lines: import('../../types').LyricLine[],
   currentTime: number,
@@ -207,9 +210,10 @@ export function getActiveLyricPair(
   const displayLines = filterDisplayLyrics(lines);
   if (displayLines.length === 0) return { current: null, next: null };
 
+  const syncTime = currentTime + LYRIC_SYNC_LEAD_SEC;
   const activeIndex = displayLines.findIndex((line, i) => {
     const next = displayLines[i + 1];
-    return currentTime >= line.time && (!next || currentTime < next.time);
+    return syncTime >= line.time && (!next || syncTime < next.time);
   });
 
   if (activeIndex >= 0) {
@@ -219,7 +223,7 @@ export function getActiveLyricPair(
     };
   }
 
-  if (currentTime < displayLines[0].time) {
+  if (syncTime < displayLines[0].time) {
     return { current: null, next: displayLines[0].text };
   }
 

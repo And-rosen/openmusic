@@ -2,7 +2,7 @@ import type { QueueItem } from '../types';
 import type { RoomVisualMode } from './roomVisualPreset';
 import { shouldProxySongPlaybackUrl } from './roomVisualPreset';
 import {
-  preloadGalaxyBackground,
+  preloadImmersiveBackground,
   preloadImage,
   reloadImmersiveTrackProxy,
   type PrepareImmersiveEnterOptions,
@@ -15,12 +15,13 @@ import { waitForCurrentTrackReady } from './immersiveEntry';
 
 /** 沉浸过渡时序（JS 等待与 CSS 动画共用） */
 export const IMMERSIVE_TIMING = {
-  revealInMs: 1680,
-  revealOutMs: 1560,
-  minLoadingMs: 980,
-  fadeInMs: 880,
-  panelInMs: 1040,
-  stepTransitionMs: 620,
+  // 适当保留转场质感，但避免进入/退出沉浸时出现明显“人为卡顿”
+  revealInMs: 920,
+  revealOutMs: 860,
+  minLoadingMs: 220,
+  fadeInMs: 520,
+  panelInMs: 680,
+  stepTransitionMs: 320,
 } as const;
 
 export const IMMERSIVE_REVEAL_IN_MS = IMMERSIVE_TIMING.revealInMs;
@@ -123,6 +124,7 @@ export async function ensureMinimumLoadingDuration(startedAt: number): Promise<v
 export interface RunImmersiveEnterPrepOptions extends PrepareImmersiveEnterOptions {
   needsCover: boolean;
   needsModeSwitch: boolean;
+  mode?: RoomVisualMode;
   onStepsChange: (steps: ImmersiveStep[]) => void;
   steps: ImmersiveStep[];
   applyVisualMode: (
@@ -138,6 +140,7 @@ export async function runImmersiveEnterPrep(options: RunImmersiveEnterPrepOption
     needsProxyReload,
     needsCover,
     needsModeSwitch,
+    mode,
     onStepsChange,
     steps,
     applyVisualMode,
@@ -151,7 +154,7 @@ export async function runImmersiveEnterPrep(options: RunImmersiveEnterPrepOption
       applyVisualMode('emily', { notifyProxyChange: false });
     }
 
-    await preloadGalaxyBackground();
+    await preloadImmersiveBackground(mode ?? 'emily');
     current = patchImmersiveStep(current, 'visual', 'done');
     onStepsChange(current);
 
@@ -216,11 +219,14 @@ export async function runImmersiveExitPrep(options: RunImmersiveExitPrepOptions)
       const prevNeedsProxy = shouldProxySongPlaybackUrl(visualMode);
       const nextNeedsProxy = shouldProxySongPlaybackUrl('cover-bg');
       if (prevNeedsProxy !== nextNeedsProxy && song) {
+        // 只做一次 reload，避免和 applyVisualMode 内部的 reload 叠加造成二次等待
         resetSharedAudioElement();
         useAudioStore.getState().requestTrackReload();
-        await waitForCurrentTrackReady(song);
+        applyVisualMode('cover-bg', { notifyProxyChange: false, reloadAudio: false });
+        await waitForCurrentTrackReady(song, 4000);
+      } else {
+        applyVisualMode('cover-bg', { notifyProxyChange: false, reloadAudio: false });
       }
-      applyVisualMode('cover-bg', { notifyProxyChange: false });
 
       current = patchImmersiveStep(current, 'audio', 'done');
       current = advanceImmersiveStep(current, 'bg');

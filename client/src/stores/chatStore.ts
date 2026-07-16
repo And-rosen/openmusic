@@ -58,7 +58,10 @@ interface ChatStore {
   append: (message: ChatMessage) => void;
   prependOlder: (messages: ChatMessage[], hasMoreOlder: boolean) => void;
   setLoadingOlder: (loading: boolean) => void;
+  /** 房间开启历史可见后，放开本地截断并允许上滑加载 */
+  unlockChatHistory: () => void;
   updateReactions: (messageId: string, reactions: ChatMessage['reactions']) => void;
+  remove: (messageId: string) => void;
   clear: () => void;
 }
 
@@ -132,11 +135,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setLoadingOlder: (loadingOlder) => set({ loadingOlder }),
 
+  unlockChatHistory: () => {
+    set((state) => {
+      if (state.chatVisibleSince == null || state.chatVisibleSince <= 0) {
+        return state.hasMoreOlder ? {} : { hasMoreOlder: true };
+      }
+      return {
+        chatVisibleSince: null,
+        hasMoreOlder: true,
+      };
+    });
+  },
+
   updateReactions: (messageId, reactions) => {
     set((state) => ({
       messages: state.messages.map((message) => (
         message.id === messageId ? { ...message, reactions } : message
       )),
+    }));
+  },
+
+  remove: (messageId) => {
+    set((state) => ({
+      messages: state.messages.filter((message) => message.id !== messageId),
     }));
   },
 

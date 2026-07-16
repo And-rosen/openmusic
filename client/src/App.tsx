@@ -1,5 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import AppUpdateGate from './components/AppUpdateGate';
 
 const Home = lazy(() => import('./pages/Home'));
 const Room = lazy(() => import('./pages/Room'));
@@ -19,6 +20,7 @@ function RouteFallback() {
 export default function App() {
   return (
     <div className="h-full">
+      <AppUpdateGate />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Home />} />

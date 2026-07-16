@@ -6,8 +6,12 @@
 
 ```bash
 npm run install:all   # 首次需要
-npm run build         # 构建前端 → client/dist
+npm run package:build # 录入更新说明并打包（推荐）
+# 或仅构建前端：
+# npm run build         # → client/dist + version.json
 ```
+
+发版后若使用 **EdgeOne**：`/api/*` 动态回源；刷新 HTML 缓存。用户会收到站内「发现新版本」提示并强制刷新。
 
 需要上传的文件/目录：
 

@@ -153,20 +153,65 @@ export default function ImmersiveFxSettingsPanel({
   onDraggingChange,
   coverUrl,
 }: Props) {
-  const [tab, setTab] = useState<ImmersiveFxTab>('preset');
+  const TAB_KEY = 'openmusic:immersive-fx-tab';
+  const FOLDS_KEY = 'openmusic:immersive-fx-folds';
+
+  const [tab, setTab] = useState<ImmersiveFxTab>(() => {
+    try {
+      const raw = sessionStorage.getItem(TAB_KEY);
+      if (!raw) return 'preset';
+      const as = String(raw) as ImmersiveFxTab;
+      return (TAB_META.map((t) => t.id) as string[]).includes(as) ? as : 'preset';
+    } catch {
+      return 'preset';
+    }
+  });
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
-  const [openFolds, setOpenFolds] = useState<Record<string, boolean>>({
+  const defaultOpenFolds = {
     lyricToggles: true,
     lyricPosition: true,
     motionCore: true,
     shelf3d: true,
     advancedCore: true,
+
+  } as const satisfies Record<string, boolean>;
+
+  const [openFolds, setOpenFolds] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = sessionStorage.getItem(FOLDS_KEY);
+      if (!raw) return { ...defaultOpenFolds };
+      const parsed = JSON.parse(raw) as Partial<Record<string, unknown>>;
+      const next: Record<string, boolean> = { ...defaultOpenFolds };
+      for (const key of Object.keys(defaultOpenFolds)) {
+        const v = parsed[key];
+        if (typeof v === 'boolean') next[key] = v;
+      }
+      return next;
+    } catch {
+      return { ...defaultOpenFolds };
+    }
   });
   const dragging = draggingKey !== null;
 
   const toggleFold = (key: string) => {
     setOpenFolds((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(TAB_KEY, tab);
+    } catch {
+      // ignore
+    }
+  }, [tab]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FOLDS_KEY, JSON.stringify(openFolds));
+    } catch {
+      // ignore
+    }
+  }, [openFolds]);
 
   useEffect(() => {
     onDraggingChange?.(dragging);

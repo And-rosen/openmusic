@@ -227,6 +227,20 @@ export default function Room() {
     || (!ignoreUrlPassword ? urlPassword : undefined)
     || getStoredRoomPassword(roomId);
 
+  // 分享链接带 ?pwd= 时立刻写入 sessionStorage 并清掉 URL，降低历史/Referer 泄露
+  useEffect(() => {
+    if (!roomId) return;
+    const fromUrl = parseRoomPasswordFromSearch(location.search);
+    if (!fromUrl) return;
+    rememberRoomPassword(roomId, fromUrl);
+    const nextSearch = stripRoomPasswordFromSearch(location.search);
+    if (nextSearch === location.search) return;
+    navigate(
+      { pathname: location.pathname, search: nextSearch },
+      { replace: true, state: location.state },
+    );
+  }, [roomId, location.pathname, location.search, location.state, navigate]);
+
   const room = useRoomStore((s) => s.room);
   const nickname = useRoomStore((s) => s.nickname);
   const showPlayer = useRoomStore((s) => s.showPlayer);
@@ -242,6 +256,7 @@ export default function Room() {
   const setPureModeEnabled = usePureModeStore((s) => s.setEnabled);
   const immersiveMode = useImmersiveModeStore((s) => s.enabled);
   const setImmersiveModeEnabled = useImmersiveModeStore((s) => s.setEnabled);
+  const setImmersiveQualityCapActive = useImmersiveModeStore((s) => s.setQualityCapActive);
   const [purePlayerHidden, setPurePlayerHidden] = useState(false);
 
   const roomPageTitle = room?.name ? `${room.name} 房间` : '正在加入房间';
@@ -255,7 +270,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setChatHistoryVisibleOnJoin, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory } = useSocket();
   const { applyFavorites } = useFavorites();
 
 
@@ -335,7 +350,9 @@ export default function Room() {
   const [qualityOpen, setQualityOpen] = useState(false);
   const [memberSaving, setMemberSaving] = useState(false);
   const [songRequestSaving, setSongRequestSaving] = useState(false);
+  const [chatHistorySaving, setChatHistorySaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
+  const playlistSearchScrollRef = useRef<HTMLDivElement>(null);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
 
@@ -370,8 +387,10 @@ export default function Room() {
     isAdmin,
     mySocketId,
     lastSongRequestAtRef.current,
+    canControlPlayback,
   );
-  const canOpenRoomSettings = isOwner || canControlPlayback;
+  const canModerate = isOwner || isAdmin;
+  const canOpenRoomSettings = canModerate;
   const songRequestSettings: SongRequestSettings = useMemo(() => ({
     enabled: room?.songRequestEnabled !== false,
     memberJumpEnabled: Boolean(room?.memberJumpEnabled),
@@ -767,6 +786,10 @@ export default function Room() {
     }
   }, [playlistChannelFilter, playlistSearchPageSize, showToast]);
 
+  useEffect(() => {
+    playlistSearchScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [playlistSearchPage]);
+
   const handlePlaylistPageSizeChange = useCallback((next: SongResultPageSize) => {
     setPlaylistSearchPageSize(next);
     setStoredSongResultPageSize(next);
@@ -1015,6 +1038,7 @@ export default function Room() {
       isAdmin,
       useRoomStore.getState().mySocketId,
       lastSongRequestAtRef.current || null,
+      useRoomStore.getState().canControlPlayback,
     );
     if (blockReason) {
       showToast(blockReason, 'error');
@@ -1056,6 +1080,18 @@ export default function Room() {
       showToast(res.error || '公告设置失败', 'error');
     }
   }, [announcementSaving, setRoomAnnouncement, showToast]);
+
+  const handleSaveChatHistory = useCallback(async (enabled: boolean) => {
+    if (chatHistorySaving) return;
+    setChatHistorySaving(true);
+    const res = await setChatHistoryVisibleOnJoin(enabled);
+    setChatHistorySaving(false);
+    if (res.success) {
+      showToast(enabled ? '已允许进房查看历史消息' : '已关闭进房查看历史消息', 'success');
+    } else {
+      showToast(res.error || '聊天设置失败', 'error');
+    }
+  }, [chatHistorySaving, setChatHistoryVisibleOnJoin, showToast]);
 
   const handleSaveSongRequestSettings = useCallback(async (settings: SongRequestSettings) => {
     if (songRequestSaving) return;
@@ -1227,6 +1263,13 @@ export default function Room() {
     [isLgUp, room?.current, showToast, visualMode],
   );
 
+  const refreshPlaybackUrlCacheForQuality = useCallback(() => {
+    const liveRoom = useRoomStore.getState().room;
+    const keepTrackKey = liveRoom?.current ? songKey(liveRoom.current) : null;
+    invalidateUnloadedSongUrlCache(keepTrackKey);
+    if (liveRoom) prefetchUpcomingFromRoom(liveRoom);
+  }, []);
+
   const runImmersiveExit = useCallback(async (kind: 'keep-bg' | 'cover-bg') => {
     if (immersiveTransitionRef.current) return;
     immersiveTransitionRef.current = true;
@@ -1266,6 +1309,7 @@ export default function Room() {
       setImmersiveModeEnabled(false);
       setVisualFxOpen(false);
       setImmersivePanelFocus(null);
+      refreshPlaybackUrlCacheForQuality();
 
       showToast(
         kind === 'cover-bg' ? '已退出沉浸模式，并切回封面背景' : '已退出沉浸模式，保留当前动态背景',
@@ -1279,7 +1323,7 @@ export default function Room() {
       setImmersiveTransition(null);
       setImmersiveShellMotion(null);
     }
-  }, [applyVisualMode, setImmersiveModeEnabled, showToast, visualMode]);
+  }, [applyVisualMode, refreshPlaybackUrlCacheForQuality, setImmersiveModeEnabled, showToast, visualMode]);
 
   const handleImmersiveExitKeepBackground = useCallback(() => {
     void runImmersiveExit('keep-bg');
@@ -1315,6 +1359,10 @@ export default function Room() {
       steps: initialSteps,
     });
 
+    // 沉浸仅临时封顶「极高」，不改写用户音质设置；设置更低时沿用设置
+    setImmersiveQualityCapActive(true);
+    refreshPlaybackUrlCacheForQuality();
+
     void (async () => {
       try {
         await runImmersiveEnterPrep({
@@ -1322,6 +1370,7 @@ export default function Room() {
           needsProxyReload,
           needsCover,
           needsModeSwitch,
+          mode: targetMode,
           steps: initialSteps,
           applyVisualMode: (mode, opts) => applyVisualMode(mode, { ...opts, reloadAudio: false }),
           onStepsChange: (steps) => {
@@ -1341,6 +1390,8 @@ export default function Room() {
         showToast('已进入沉浸模式', 'success');
       } catch (error) {
         console.error('Failed to enter immersive mode:', error);
+        setImmersiveQualityCapActive(false);
+        refreshPlaybackUrlCacheForQuality();
         showToast('沉浸模式加载失败，请重试', 'error');
       } finally {
         immersiveTransitionRef.current = false;
@@ -1351,7 +1402,9 @@ export default function Room() {
   }, [
     applyVisualMode,
     immersiveMode,
+    refreshPlaybackUrlCacheForQuality,
     setImmersiveModeEnabled,
+    setImmersiveQualityCapActive,
     showToast,
     visualMode,
   ]);
@@ -1635,7 +1688,7 @@ export default function Room() {
       className={`flex min-h-0 flex-col ${fillHeight ? 'h-full' : ''}`}
       style={fillHeight ? undefined : { height: RESULT_BODY_HEIGHT }}
     >
-      <div className={`relative min-h-0 flex-1 overflow-y-auto ${playlistSearchLoading ? 'pointer-events-none' : ''}`}>
+      <div ref={playlistSearchScrollRef} className={`relative min-h-0 flex-1 overflow-y-auto ${playlistSearchLoading ? 'pointer-events-none' : ''}`}>
         <div className={`space-y-2 transition-opacity ${playlistSearchLoading ? 'opacity-40' : ''}`}>
           {playlistSearchResults.map((playlist) => (
             <Tooltip key={`${playlist.platform}-${playlist.id}`} content="双击查看歌单" side="bottom">
@@ -1983,12 +2036,14 @@ export default function Room() {
       <RoomSettingsModal
         open={settingsOpen}
         isOwner={isOwner}
-        canModerate={isOwner || canControlPlayback}
+        canModerate={canModerate}
         fmMode={normalizeFmMode(room?.neteaseFmMode)}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
         announcementText={room?.announcementText || ''}
         announcementSaving={announcementSaving}
+        chatHistoryVisibleOnJoin={Boolean(room?.chatHistoryVisibleOnJoin)}
+        chatHistorySaving={chatHistorySaving}
         songRequest={songRequestSettings}
         songRequestSaving={songRequestSaving}
         bannedSongs={room?.bannedSongs ?? []}
@@ -1998,6 +2053,7 @@ export default function Room() {
         onSaveFmMode={handleSaveFmMode}
         onOpenMemberModal={handleOpenMemberModalFromSettings}
         onSaveAnnouncement={handleSaveAnnouncement}
+        onSaveChatHistory={handleSaveChatHistory}
         onSaveSongRequest={handleSaveSongRequestSettings}
       />
       </Suspense>

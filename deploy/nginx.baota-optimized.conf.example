@@ -48,7 +48,13 @@ server {
     ssl_session_tickets on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
-    add_header Strict-Transport-Security "max-age=31536000";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # 宽松基线：不挡音频/封面 CDN；若需收紧可改为 report-only 观察后再 enforce
+    # add_header Content-Security-Policy-Report-Only "default-src 'self'; media-src 'self' https: blob:; img-src 'self' https: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:;" always;
     add_header Alt-Svc 'quic=":443"; h3=":443"; h3-29=":443"; h3-27=":443";h3-25=":443"; h3-T050=":443"; h3-Q050=":443";h3-Q049=":443";h3-Q048=":443"; h3-Q046=":443"; h3-Q043=":443"';
     error_page 497 https://$host$request_uri;
     #SSL-END
@@ -200,15 +206,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # ★ 静态直出（固定文件名，缓存 1 天；发版后清 EO /assets）
+    # ★ 静态直出（资源带 content hash，可长期缓存；HTML 勿缓存）
+    # EdgeOne：/api/* 建议动态回源；发版后至少刷新 HTML / 首页缓存
     # 优先使用构建产物的 .gz / .br（vite-plugin-compression2）
     gzip_static on;
     # 若 Nginx 已装 brotli 模块可取消下一行注释：
     # brotli_static on;
 
     location ^~ /assets/ {
-        expires 1d;
-        add_header Cache-Control "public, max-age=86400" always;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800, immutable" always;
         access_log off;
         try_files $uri =404;
     }

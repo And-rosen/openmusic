@@ -39,8 +39,9 @@ function persistDeviceId(deviceId: string): void {
 }
 
 /**
- * 本机持久设备 ID（localStorage + sessionStorage）。
- * 与服务端 HttpOnly `openmusic_did` 配对，用于 Cookie 丢失后恢复同一账号。
+ * 本机辅助设备 ID（localStorage + sessionStorage）。
+ * 账号恢复仅依赖服务端 HttpOnly `openmusic_did` Cookie；此处不可单独领回身份。
+ * 已有合法会话时，bootstrap 仍可用 body 携带此 ID 做设备绑定对齐。
  */
 export function getDeviceId(): string {
   if (cachedDeviceId) return cachedDeviceId;

@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Reply, Smile } from 'lucide-react';
 import type { ChatMessage, ChatReplyRef, RoomMemberTier, RoomUser } from '../types';
 import QFaceImage from './QFaceImage';
@@ -6,9 +6,11 @@ import Tooltip from './Tooltip';
 import MemberTierBadge from './MemberTierBadge';
 import RoleBadge from './RoleBadge';
 import { ChatMessageReactions } from './ChatMessageReactions';
+import ChatMessageContextMenu, { type ChatMessageMenuPos } from './ChatMessageContextMenu';
 import {
   CHAT_PHOTO_CLASS,
   CHAT_STICKER_CLASS,
+  canRecallChatMessage,
   formatChatTime,
   isChatStickerMessage,
   tokenizeMentionSegments,
@@ -96,9 +98,11 @@ export interface ChatMessageRowProps {
   pureImageRevealed: boolean;
   reactionPickerOpen: boolean;
   chatMuted: boolean;
+  canModerate?: boolean;
   chatScrollRoot: HTMLDivElement | null;
   chatPanelRef: React.RefObject<HTMLDivElement | null>;
   onReply: (msg: ChatMessage) => void;
+  onRecall?: (msg: ChatMessage) => void;
   onMentionUser: (user: RoomUser) => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onOpenReactionPicker: (messageId: string | null) => void;
@@ -115,9 +119,11 @@ function ChatMessageRow({
   pureImageRevealed,
   reactionPickerOpen,
   chatMuted,
+  canModerate = false,
   chatScrollRoot,
   chatPanelRef,
   onReply,
+  onRecall,
   onMentionUser,
   onToggleReaction,
   onOpenReactionPicker,
@@ -125,16 +131,41 @@ function ChatMessageRow({
   onPreviewImage,
   onContentResize,
 }: ChatMessageRowProps) {
+  const [menuPos, setMenuPos] = useState<ChatMessageMenuPos | null>(null);
   const userMap = useMemo(
     () => new Map(room.users.map((user) => [user.id, user])),
     [room.users],
   );
   const nicknames = useMemo(() => room.users.map((user) => user.nickname), [room.users]);
+  const canRecall = canRecallChatMessage(msg, myUserId, {
+    canModerate,
+    isOwner: Boolean(room.creatorId && myUserId === room.creatorId),
+    creatorId: room.creatorId,
+    adminIds: room.adminIds,
+  });
+
+  const closeMenu = useCallback(() => setMenuPos(null), []);
+
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenuPos({ x: event.clientX, y: event.clientY });
+  }, []);
 
   if (msg.kind === 'welcome') {
     if (pureMode) return null;
     return (
       <WelcomeChatRow msg={msg} onContentResize={onContentResize} />
+    );
+  }
+
+  if (msg.kind === 'recall') {
+    return (
+      <div className="flex justify-center px-2 py-1">
+        <p className="max-w-[92%] text-center text-[11px] leading-5 text-netease-muted/80">
+          {msg.text}
+        </p>
+      </div>
     );
   }
 
@@ -240,10 +271,7 @@ function ChatMessageRow({
   };
 
   return (
-    <div
-      className={`group flex w-full min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`}
-      onContextMenu={(event) => { event.preventDefault(); onReply(msg); }}
-    >
+    <div className={`group flex w-full min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`}>
       <div className={`mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
         <button
           type="button"
@@ -271,16 +299,16 @@ function ChatMessageRow({
           {isStickerImage ? (
             <div className={`flex min-w-0 max-w-full flex-col gap-1 ${isMe ? 'items-end' : 'items-start'}`}>
               {msg.replyTo && (
-                <div className={replyBubbleClass}>
+                <div className={replyBubbleClass} onContextMenu={handleContextMenu}>
                   {renderReplyPreview()}
                 </div>
               )}
-              <div className="min-w-0 max-w-full">
+              <div className="min-w-0 max-w-full" onContextMenu={handleContextMenu}>
                 {renderStickerContent()}
               </div>
             </div>
           ) : (
-            <div className={bubbleClass}>
+            <div className={bubbleClass} onContextMenu={handleContextMenu}>
               {msg.replyTo && (
                 <div className={`mb-1 ${isPhotoOnly ? 'mx-1 mt-1' : ''}`}>
                   {renderReplyPreview()}
@@ -305,7 +333,12 @@ function ChatMessageRow({
           }`}
         >
           <Tooltip content="回复">
-            <button type="button" onClick={() => onReply(msg)} className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white" aria-label="回复">
+            <button
+              type="button"
+              onClick={() => onReply(msg)}
+              className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white"
+              aria-label="回复"
+            >
               <Reply className="h-3 w-3" />
             </button>
           </Tooltip>
@@ -323,6 +356,18 @@ function ChatMessageRow({
           </Tooltip>
         </div>
       </div>
+
+      <ChatMessageContextMenu
+        open={menuPos !== null}
+        pos={menuPos}
+        canRecall={Boolean(canRecall && onRecall)}
+        chatMuted={chatMuted}
+        containerRef={chatPanelRef}
+        onClose={closeMenu}
+        onRecall={() => onRecall?.(msg)}
+        onReaction={() => onOpenReactionPicker(msg.id)}
+        onReply={() => onReply(msg)}
+      />
     </div>
   );
 }
@@ -382,6 +427,7 @@ export default memo(ChatMessageRow, (prev, next) => (
   && prev.pureImageRevealed === next.pureImageRevealed
   && prev.reactionPickerOpen === next.reactionPickerOpen
   && prev.chatMuted === next.chatMuted
+  && prev.canModerate === next.canModerate
   && prev.myUserId === next.myUserId
   && prev.room.creatorId === next.room.creatorId
   && prev.room.adminIds === next.room.adminIds

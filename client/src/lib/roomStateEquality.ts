@@ -159,6 +159,7 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && a.ownerId === b.ownerId
     && a.creatorId === b.creatorId
     && stringArraysEqual(a.adminIds, b.adminIds)
+    && stringArraysEqual(a.autoPromotedAdminIds, b.autoPromotedAdminIds)
     && recordShallowEqual(a.userNicknames, b.userNicknames)
     && a.ownerConnectionId === b.ownerConnectionId
     && roomQueueEqual(a.queue, b.queue)
@@ -175,6 +176,7 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && a.neteaseFmMode === b.neteaseFmMode
     && a.announcementEnabled === b.announcementEnabled
     && a.announcementText === b.announcementText
+    && a.chatHistoryVisibleOnJoin === b.chatHistoryVisibleOnJoin
     && a.songRequestEnabled === b.songRequestEnabled
     && a.memberJumpEnabled === b.memberJumpEnabled
     && a.systemMediaPlayBound === b.systemMediaPlayBound

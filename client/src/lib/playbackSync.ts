@@ -24,6 +24,8 @@ const FINAL_WINDOW_SEC = 3;
 /** 播放中远端校正阈值；略低于常见 pending-snapshot 延迟，避免长期固定偏差 */
 const REMOTE_SEEK_THRESHOLD_SEC = 0.5;
 const BEYOND_DURATION_GRACE_SEC = 0.15;
+/** 本机已播完时不再反复 ended_recover，等待服务端切歌 */
+const LOCAL_ENDED_WAIT_SEC = 0.35;
 
 export type FollowerSyncResult = PlayResult | 'paused' | 'idle' | 'beyond_duration';
 
@@ -65,6 +67,25 @@ function isPositionBeyondDuration(
   durationSec: number,
 ): boolean {
   return durationSec > 0 && positionSec >= durationSec + BEYOND_DURATION_GRACE_SEC;
+}
+
+function isAudioAtLocalTrackEnd(
+  audio: HTMLAudioElement,
+  durationSec: number,
+): boolean {
+  if (!audio.ended) return false;
+  const mediaDur = Number.isFinite(audio.duration) && audio.duration > 0
+    ? audio.duration
+    : durationSec;
+  if (mediaDur > 0) {
+    return audio.currentTime >= mediaDur - LOCAL_ENDED_WAIT_SEC;
+  }
+  return true;
+}
+
+function playbackStateStillMatchesSong(song: QueueItem): boolean {
+  const state = getClientPlaybackState();
+  return Boolean(state && (!state.trackId || state.trackId === song.queueId));
 }
 
 /** 用户 seek / 切歌：必须立即同步 */
@@ -221,18 +242,31 @@ async function recoverFromEndedAudio(
 ): Promise<FollowerSyncResult> {
   const state = getClientPlaybackState();
   if (!state || state.status !== 'playing') return 'idle';
+  if (state.trackId && state.trackId !== options.song.queueId) {
+    debugLog('sync_skip', debugLine({
+      reason: 'ended_recover_track_changed',
+      expectedTrackId: options.song.queueId,
+      actualTrackId: state.trackId,
+      version: state.version,
+    }));
+    return 'idle';
+  }
 
   const target = resolveTargetTime(audio, options);
   const durationSec = resolveSyncDurationSec(audio, options.song, state);
   const trackId = state.trackId || options.song.queueId;
 
-  if (isPositionBeyondDuration(target, durationSec)) {
+  if (
+    isPositionBeyondDuration(target, durationSec)
+    || isAudioAtLocalTrackEnd(audio, durationSec)
+  ) {
     debugLog('sync_ended_beyond_duration', debugLine({
       reason,
       target: Number(target.toFixed(3)),
       durationSec: Number(durationSec.toFixed(3)),
       trackId,
       version: state.version,
+      localEnded: audio.ended,
     }));
     return 'beyond_duration';
   }
@@ -246,6 +280,18 @@ async function recoverFromEndedAudio(
     trackId,
     version: state.version,
   }));
+
+  // 旧任务排队期间如果已经切歌，这里直接放弃，避免对新歌 audio 做 seek/play
+  if (!playbackStateStillMatchesSong(options.song)) {
+    const latest = getClientPlaybackState();
+    debugLog('sync_skip', debugLine({
+      reason: 'ended_recover_stale_after_check',
+      expectedTrackId: options.song.queueId,
+      actualTrackId: latest?.trackId ?? null,
+      version: latest?.version ?? null,
+    }));
+    return 'idle';
+  }
 
   ensureFinalSyncTrack(trackId);
   finalSyncDone = false;
@@ -261,6 +307,9 @@ async function recoverFromEndedAudio(
     result,
     audio: Number(audio.currentTime.toFixed(3)),
   }));
+  if (isAudioAtLocalTrackEnd(audio, durationSec)) {
+    return 'beyond_duration';
+  }
   return result;
 }
 
@@ -270,6 +319,15 @@ async function applyCorrectionSync(
   options: ApplySyncOptions,
 ): Promise<PlayResult | 'paused' | 'idle'> {
   const state = getClientPlaybackState();
+  if (state?.trackId && state.trackId !== options.song.queueId) {
+    debugLog('sync_skip', debugLine({
+      reason: 'correction_track_changed',
+      expectedTrackId: options.song.queueId,
+      actualTrackId: state.trackId,
+      version: state.version,
+    }));
+    return 'idle';
+  }
   const target = resolveTargetTime(audio, options);
   const trackId = state?.trackId || options.song.queueId;
   const isPlaying = state?.status === 'playing';
@@ -314,6 +372,15 @@ async function applyMandatorySync(
   options: ApplySyncOptions,
 ): Promise<PlayResult | 'paused' | 'idle'> {
   const state = getClientPlaybackState();
+  if (state?.trackId && state.trackId !== options.song.queueId) {
+    debugLog('sync_skip', debugLine({
+      reason: 'mandatory_track_changed',
+      expectedTrackId: options.song.queueId,
+      actualTrackId: state.trackId,
+      version: state.version,
+    }));
+    return 'idle';
+  }
   const target = resolveTargetTime(audio, options);
   const trackId = state?.trackId || options.song.queueId;
   const isPlaying = state?.status === 'playing';
@@ -351,6 +418,18 @@ export async function applyFollowerSync(
   recordSyncDrift(audio, options, mode);
 
   if (isEndedWhileServerPlaying(audio, options.song)) {
+    const state = getClientPlaybackState();
+    const durationSec = resolveSyncDurationSec(audio, options.song, state);
+    if (isAudioAtLocalTrackEnd(audio, durationSec)) {
+      debugLog('sync_skip', debugLine({
+        reason: 'ended_at_local_end_wait_advance',
+        trackId: options.song.queueId,
+        version: state?.version ?? null,
+        audio: Number(audio.currentTime.toFixed(3)),
+        durationSec: durationSec > 0 ? Number(durationSec.toFixed(3)) : null,
+      }));
+      return 'idle';
+    }
     return recoverFromEndedAudio(audio, options, mode);
   }
 

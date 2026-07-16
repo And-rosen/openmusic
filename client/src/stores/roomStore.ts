@@ -24,6 +24,7 @@ interface RoomStore {
     connectionId?: string | null,
     isAdmin?: boolean,
     isPlaybackLeader?: boolean,
+    canControlPlayback?: boolean,
   ) => void;
   syncRolesFromRoom: (room: RoomState) => void;
   setShowPlayer: (show: boolean) => void;
@@ -55,12 +56,13 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     myConnectionId = null,
     isAdmin = false,
     isPlaybackLeader = false,
+    canControlPlayback,
   ) => set({
     mySocketId,
     myConnectionId,
     isOwner,
     isAdmin,
-    canControlPlayback: isOwner || isAdmin,
+    canControlPlayback: canControlPlayback ?? (isOwner || isAdmin),
     isPlaybackLeader,
   }),
   syncRolesFromRoom: (room) => {
@@ -68,7 +70,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     if (!mySocketId) return;
     const nextIsOwner = room.creatorId === mySocketId;
     const nextIsAdmin = (room.adminIds || []).includes(mySocketId);
-    const nextCanControl = nextIsOwner || nextIsAdmin;
+    const nextCanControl = nextIsOwner
+      || nextIsAdmin
+      || (room.autoPromotedAdminIds || []).includes(mySocketId);
     const nextIsLeader = room.ownerId === mySocketId;
     if (
       nextIsOwner === isOwner

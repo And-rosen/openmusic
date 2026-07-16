@@ -4,6 +4,10 @@ import { pipeline } from 'stream/promises';
 export const DEFAULT_MEDIA_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+const MAX_MEDIA_REDIRECTS = 5;
+/** 缓冲类响应（封面图等）体积上限，防止代理内存耗尽 */
+const MAX_BUFFERED_MEDIA_BYTES = 8 * 1024 * 1024;
+
 function hostnameOf(rawUrl) {
   try {
     return new URL(rawUrl).hostname.toLowerCase();
@@ -12,11 +16,80 @@ function hostnameOf(rawUrl) {
   }
 }
 
+/** 精确或后缀匹配：`a.com` / `x.a.com`，拒绝 `evil-a.com` / `a.com.evil` */
+function hostMatchesDomain(host, domain) {
+  const h = String(host || '').toLowerCase();
+  const d = String(domain || '').toLowerCase();
+  if (!h || !d) return false;
+  return h === d || h.endsWith(`.${d}`);
+}
+
+function hostMatchesAnyDomain(host, domains) {
+  return domains.some((domain) => hostMatchesDomain(host, domain));
+}
+
 function isKugouHost(host) {
-  return Boolean(
-    host
-    && (host.includes('kugou') || host.includes('kgimg') || /\.kg(cdn|img)?\./i.test(host)),
-  );
+  return hostMatchesAnyDomain(host, [
+    'kugou.com',
+    'kugou.net',
+    'kgimg.com',
+    'kgcdn.com',
+    'kgimg.net',
+  ]);
+}
+
+function isQqMusicHost(host) {
+  return hostMatchesAnyDomain(host, [
+    'qq.com',
+    'gtimg.com',
+    'tencentmusic.com',
+  ]);
+}
+
+function isNeteaseMusicHost(host) {
+  return hostMatchesAnyDomain(host, [
+    '163.com',
+    '126.net',
+    'netease.com',
+  ]);
+}
+
+/** 拒绝内网 / 链路本地 / 元数据主机，防止 SSRF */
+export function isBlockedMediaHostname(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost') return true;
+  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true;
+  if (host === 'metadata.google.internal' || host === 'metadata') return true;
+
+  if (
+    host === '::1'
+    || host === '127.0.0.1'
+    || host === '0.0.0.0'
+    || host.startsWith('10.')
+    || host.startsWith('192.168.')
+    || host.startsWith('169.254.')
+    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    || /^fc|^fd/i.test(host)
+    || /^fe80:/i.test(host)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 仅允许音乐 CDN / 已知媒体域名（可附带 Meting 主机名例外，用于解析前的中间跳）。
+ * @param {string} hostname
+ * @param {string[]} [extraAllowedHosts]
+ */
+export function isAllowedMediaHostname(hostname, extraAllowedHosts = []) {
+  const host = String(hostname || '').toLowerCase();
+  if (!host) return false;
+  for (const extra of extraAllowedHosts) {
+    if (extra && host === String(extra).toLowerCase()) return true;
+  }
+  return isKugouHost(host) || isQqMusicHost(host) || isNeteaseMusicHost(host);
 }
 
 /**
@@ -25,17 +98,8 @@ function isKugouHost(host) {
 export function refererForMediaUrl(rawUrl) {
   const host = hostnameOf(rawUrl);
   if (isKugouHost(host)) return 'https://www.kugou.com/';
-  if (
-    host.includes('gtimg')
-    || host.includes('qq.com')
-    || host.includes('tencentmusic')
-    || host.includes('y.qq')
-  ) {
-    return 'https://y.qq.com/';
-  }
-  if (host.includes('126.net') || host.includes('163.com') || host.includes('netease')) {
-    return 'https://music.163.com/';
-  }
+  if (isQqMusicHost(host)) return 'https://y.qq.com/';
+  if (isNeteaseMusicHost(host)) return 'https://music.163.com/';
   return 'https://music.163.com/';
 }
 
@@ -49,12 +113,7 @@ export function preferHttpsMediaUrl(rawUrl) {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
     if (isKugouHost(host)) return url;
-    const canUpgrade =
-      host.includes('126.net')
-      || host.includes('163.com')
-      || host.includes('gtimg')
-      || host.includes('qq.com')
-      || host.includes('tencentmusic');
+    const canUpgrade = isNeteaseMusicHost(host) || isQqMusicHost(host);
     if (!canUpgrade) return url;
     parsed.protocol = 'https:';
     return parsed.toString();
@@ -82,6 +141,77 @@ function isAudioStream(contentType, range) {
   return Boolean(contentType && /^(audio|video|application\/octet-stream)\b/i.test(contentType));
 }
 
+function assertSafeMediaUrl(rawUrl, extraAllowedHosts, { requireAllowlist }) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    const err = new Error('无效地址');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    const err = new Error('不支持的协议');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (isBlockedMediaHostname(parsed.hostname)) {
+    const err = new Error('禁止访问内网地址');
+    err.statusCode = 403;
+    throw err;
+  }
+  if (requireAllowlist && !isAllowedMediaHostname(parsed.hostname, extraAllowedHosts)) {
+    const err = new Error('不允许的媒体域名');
+    err.statusCode = 403;
+    throw err;
+  }
+  return parsed;
+}
+
+/**
+ * 手动跟随重定向，每一跳重新校验主机名，避免公网 302 跳内网绕过 SSRF 检查。
+ */
+export async function fetchMediaWithSafeRedirects(fetchWithTimeout, rawUrl, fetchOptions = {}, timeoutMs = 20000) {
+  const extraAllowedHosts = fetchOptions.extraAllowedHosts || [];
+  const requireAllowlist = fetchOptions.requireAllowlist !== false;
+  const headers = { ...(fetchOptions.headers || {}) };
+
+  let currentUrl = preferHttpsMediaUrl(rawUrl);
+
+  for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop += 1) {
+    assertSafeMediaUrl(currentUrl, extraAllowedHosts, { requireAllowlist });
+
+    const response = await fetchWithTimeout(
+      currentUrl,
+      { ...fetchOptions, headers, redirect: 'manual' },
+      timeoutMs,
+    );
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = String(response.headers.get('location') || '').trim();
+      if (!location) {
+        const err = new Error('上游返回空重定向');
+        err.statusCode = 502;
+        throw err;
+      }
+      try {
+        currentUrl = preferHttpsMediaUrl(new URL(location, currentUrl).toString());
+      } catch {
+        const err = new Error('上游重定向地址无效');
+        err.statusCode = 502;
+        throw err;
+      }
+      continue;
+    }
+
+    return response;
+  }
+
+  const err = new Error('上游重定向次数过多');
+  err.statusCode = 502;
+  throw err;
+}
+
 /**
  * 从上游拉取媒体并返回给客户端。
  * 图片/缩略图整包缓冲；音频 Range 流式转发（勿中途 abort body）。
@@ -103,13 +233,21 @@ export async function serveUpstreamMedia(rawUrl, res, fetchWithTimeout, options 
   let response;
   try {
     // timeout 只约束建连+响应头；fetch resolve 后会清除 abort，body 可持续流
-    response = await fetchWithTimeout(
+    response = await fetchMediaWithSafeRedirects(
+      fetchWithTimeout,
       fetchUrl,
-      { headers, redirect: 'follow' },
+      {
+        headers,
+        extraAllowedHosts: options.extraAllowedHosts || [],
+        requireAllowlist: options.requireAllowlist !== false,
+      },
       options.timeoutMs || 20000,
     );
-  } catch {
-    if (!res.headersSent) res.status(502).json({ error: '媒体代理失败' });
+  } catch (err) {
+    if (!res.headersSent) {
+      const status = Number(err?.statusCode) || 502;
+      res.status(status).json({ error: err?.message || '媒体代理失败' });
+    }
     return false;
   }
 
@@ -127,7 +265,16 @@ export async function serveUpstreamMedia(rawUrl, res, fetchWithTimeout, options 
 
   if (useBuffer) {
     try {
+      const declaredLen = Number(response.headers.get('content-length') || 0);
+      if (Number.isFinite(declaredLen) && declaredLen > MAX_BUFFERED_MEDIA_BYTES) {
+        if (!res.headersSent) res.status(413).json({ error: '媒体过大' });
+        return false;
+      }
       const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > MAX_BUFFERED_MEDIA_BYTES) {
+        if (!res.headersSent) res.status(413).json({ error: '媒体过大' });
+        return false;
+      }
       if (res.writableEnded || res.destroyed) return false;
       if (contentType) res.set('Content-Type', contentType);
       res.status(200).send(buffer);

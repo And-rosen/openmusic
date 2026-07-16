@@ -137,6 +137,10 @@ function formatSnapshotText(reason: string): string {
       ? 'inf'
       : Math.round((derived - audio.currentTime) * 1000);
     const timing = getPlaybackSnapshotTiming();
+    const serverNowMs = Number(pb.serverNowMs);
+    const clockSkewMs = Number.isFinite(serverNowMs) && serverNowMs > 0
+      ? Math.round(Date.now() - serverNowMs)
+      : null;
     lines.push(debugLine({
       pbVersion: pb.version,
       pbTrackId: pb.trackId,
@@ -150,6 +154,7 @@ function formatSnapshotText(reason: string): string {
       pbReceivedAt: timing?.receivedAt ?? pb.receivedAt,
       pbCommittedAt: timing?.committedAt ?? pb.committedAt,
       snapshotAgeMs: timing?.snapshotAgeMs ?? null,
+      clockSkewMs,
     }));
   } else {
     lines.push('playback_state=null');
