@@ -80,7 +80,7 @@ METING_API_AUTH=你的meting_token
 
 | 变量 | 说明 |
 |------|------|
-| `CYAPI_KEY` | 🔵 可选；蓝点搜索 / 空队列随机推荐（[迟言 API](https://cyapi.top/)） |
+| `CYAPI_KEY` | 🔵 可选；蓝点搜索、空队列随机推荐、聊天图片审核（[迟言 API](https://cyapi.top/)） |
 | `REDIS_URL` | 🗄️ 可选；房间与热榜持久化，**强烈推荐** |
 | `QINIU_*` | 🖼️ 可选；聊天发图 |
 | `APIHZ_BASE_URL` | 可选；接口盒子 API 根地址，默认 `https://cn.apihz.cn/api` |

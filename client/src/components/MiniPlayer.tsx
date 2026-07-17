@@ -140,7 +140,7 @@ export default memo(function MiniPlayer({
         <PlaybackProgressBar
           song={current}
           onSeek={handleSeek}
-          disabled={!current.duration}
+          disabled={!canControlPlayback}
           variant="mineradio"
         />
         <div className="mineradio-controls">

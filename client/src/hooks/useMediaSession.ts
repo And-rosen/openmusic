@@ -118,25 +118,31 @@ export function useMediaSession({
               void controlsRef.current.requestSkip();
             }
           : undefined,
-        seekbackward: hasTrack && canControl
-          ? (details) => {
+        seekbackward: hasTrack
+          ? (canControl
+            ? (details) => {
               const step = Number(details.seekOffset) > 0 ? Number(details.seekOffset) : SEEK_STEP_SEC;
               const time = useAudioStore.getState().smoothPlaybackTime;
               controlsRef.current.seekTo(Math.max(0, time - step));
             }
+            : () => { syncPosition(); })
           : undefined,
-        seekforward: hasTrack && canControl
-          ? (details) => {
+        seekforward: hasTrack
+          ? (canControl
+            ? (details) => {
               const step = Number(details.seekOffset) > 0 ? Number(details.seekOffset) : SEEK_STEP_SEC;
               const time = useAudioStore.getState().smoothPlaybackTime;
               controlsRef.current.seekTo(time + step);
             }
+            : () => { syncPosition(); })
           : undefined,
-        seekto: hasTrack && canControl
-          ? (details) => {
+        seekto: hasTrack
+          ? (canControl
+            ? (details) => {
               if (typeof details.seekTime !== 'number' || !Number.isFinite(details.seekTime)) return;
               controlsRef.current.seekTo(Math.max(0, details.seekTime));
             }
+            : () => { syncPosition(); })
           : undefined,
         stop: hasTrack && canControl && playBound
           ? () => {

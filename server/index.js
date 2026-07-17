@@ -95,6 +95,7 @@ import {
   isCyapiConfigured,
   searchKugouMusic,
   getKugouSongDetail,
+  moderateCyapiImage,
 } from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
@@ -103,6 +104,7 @@ import {
   createChatImageUploadToken,
   isQiniuConfigured,
 } from './qiniuOss.js';
+import { isLocalStickerImageKey } from './localSticker.js';
 import {
   isApihzStickerConfigured,
   searchApihzStickers,
@@ -1523,6 +1525,7 @@ io.on('connection', (socket) => {
       connectionId: socket.id,
       location: fallbackLocationForIp(clientIp),
       deviceId: deviceId || undefined,
+      clientIp: clientIp || undefined,
     });
     if (!joinedRoom) {
       callback?.({ success: false, error: '加入房间失败' });
@@ -2324,6 +2327,15 @@ io.on('connection', (socket) => {
       }
     }
 
+    const imageContent = String(imageUrl || '').trim();
+    if (imageContent && !isLocalStickerImageKey(imageKey)) {
+      const imageModeration = await moderateCyapiImage(imageContent);
+      if (!imageModeration.ok) {
+        callback?.({ success: false, error: imageModeration.error });
+        return;
+      }
+    }
+
     const result = addChatMessage(roomId, getSocketUserId(socket), text, {
       mentions,
       replyTo,
@@ -2541,7 +2553,7 @@ io.on('connection', (socket) => {
 
     const updated = seekTo(roomId, getSocketUserId(socket), time, socket.id);
     if (!updated) {
-      callback?.({ success: false, error: '仅房主可调节进度' });
+      callback?.({ success: false, error: '仅房主或管理员可调节进度' });
       return;
     }
     emitPlaybackOnly(roomId);

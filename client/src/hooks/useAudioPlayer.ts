@@ -54,7 +54,7 @@ import {
 } from '../lib/playbackQualityLock';
 import { waitForAudioMinimumReady } from '../lib/audioReady';
 import { applyFollowerSync, applyVisibilityResume, applyPostBufferSync, isEndedWhileServerPlaying } from '../lib/playbackSync';
-import { getClientPlaybackState, optimisticSeekPosition } from '../lib/playbackState';
+import { getClientPlaybackState, getPlaybackTime, optimisticSeekPosition } from '../lib/playbackState';
 import { attachAudioBufferingListeners, isAudioBuffering, setAudioBufferEndHandler } from '../lib/audioBuffering';
 import { flushPendingPlaybackSnapshot } from '../lib/playbackSchedule';
 import { isSongPreviewSuppressingRoom, stopSongPreview } from '../lib/songPreviewPlayer';
@@ -68,6 +68,7 @@ import {
 
 let audioListenersAttached = false;
 let audioListenersTarget: HTMLAudioElement | null = null;
+let enforcingFollowerSeek = false;
 
 /** 播放中低频漂移校准（非 RAF，避免高频 seek） */
 const CALIBRATION_INTERVAL_MS = 6000;
@@ -115,6 +116,27 @@ const UNLOCK_POLL_MS = isMobileDevice() ? 120 : 800;
 
 function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   return getTrackKey(song);
+}
+
+function revertUnauthorizedSeek(audio: HTMLAudioElement): void {
+  if (useRoomStore.getState().canControlPlayback) return;
+  const live = useRoomStore.getState().room;
+  const current = live?.current;
+  if (!current || !isAudioBoundToQueue(audio, current.queueId)) return;
+
+  const state = getClientPlaybackState();
+  const expected = state?.trackId === current.queueId
+    ? getPlaybackTime(state)
+    : (live.currentTime ?? 0);
+  if (!Number.isFinite(expected) || Math.abs(audio.currentTime - expected) < 0.15) return;
+
+  enforcingFollowerSeek = true;
+  try {
+    audio.currentTime = Math.max(0, expected);
+    snapSmoothPlaybackTime(expected);
+  } finally {
+    enforcingFollowerSeek = false;
+  }
 }
 
 function durationSources() {
@@ -424,6 +446,16 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!live.room?.isPlaying || !live.room.current) return;
         if (!isAudioBoundToQueue(audio, live.room.current.queueId)) return;
         void audio.play().catch(() => {});
+      });
+
+      audio.addEventListener('seeking', () => {
+        if (enforcingFollowerSeek) return;
+        revertUnauthorizedSeek(audio);
+      });
+
+      audio.addEventListener('seeked', () => {
+        if (enforcingFollowerSeek) return;
+        revertUnauthorizedSeek(audio);
       });
 
       audio.addEventListener('error', () => {
@@ -938,6 +970,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [controller]);
 
   const handleSeek = useCallback((time: number) => {
+    if (!useRoomStore.getState().canControlPlayback) return;
+
     const live = useRoomStore.getState().room;
     const current = live?.current;
     if (!live || !current) return;

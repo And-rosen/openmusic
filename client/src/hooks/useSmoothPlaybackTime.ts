@@ -48,11 +48,22 @@ function readAudioCurrentTime(song: TimeCapSong | null | undefined): number | nu
   return capSongTime(audio.currentTime, song);
 }
 
+/** 听众以房间播放时钟为准，避免本机误拖进度条后 UI 跟着跑偏 */
+function resolveDisplayedPlaybackTime(song: TimeCapSong | null | undefined): number | null {
+  if (!song || !stateMatchesSong(song)) return null;
+  if (!useRoomStore.getState().canControlPlayback) {
+    const state = getClientPlaybackState();
+    if (!state) return null;
+    return capSongTime(getPlaybackTime(state), song);
+  }
+  return readAudioCurrentTime(song);
+}
+
 function publishAudioTimeForSong(song: TimeCapSong | null | undefined, force = false) {
   if (!stateMatchesSong(song)) return;
-  const fromAudio = readAudioCurrentTime(song);
-  if (fromAudio !== null) {
-    publishSmoothPlaybackTime(fromAudio, force);
+  const displayed = resolveDisplayedPlaybackTime(song);
+  if (displayed !== null) {
+    publishSmoothPlaybackTime(displayed, force);
     return;
   }
   const state = getClientPlaybackState();
@@ -87,6 +98,8 @@ export function snapSmoothPlaybackTime(time: number) {
 }
 
 function readLocalPlaybackTime(song: TimeCapSong | null | undefined): number {
+  const displayed = resolveDisplayedPlaybackTime(song);
+  if (displayed !== null) return displayed;
   if (!song || !stateMatchesSong(song)) {
     return useAudioStore.getState().smoothPlaybackTime;
   }
@@ -97,8 +110,8 @@ function readLocalPlaybackTime(song: TimeCapSong | null | undefined): number {
 
 /**
  * 歌词/进度条用的高频播放时间（全局单例 RAF）。
- * 播放中唯一时间源：本机 HTMLAudioElement.currentTime。
- * 暂停时读 audio 冻结位置；无音频源时回退服务端 PlaybackState。
+ * 有控制权：本机 HTMLAudioElement.currentTime。
+ * 听众：房间服务端播放时钟，本机误拖进度不影响展示。
  */
 export function useSmoothPlaybackTime(): number {
   const isPlaying = useRoomStore((s) => s.room?.isPlaying ?? false);
