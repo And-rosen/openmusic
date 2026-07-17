@@ -13,19 +13,22 @@ export const LOCAL_APP_BUILD_ID =
 export const LOCAL_APP_NOTES: string[] =
   Array.isArray(__APP_VERSION_NOTES__) ? __APP_VERSION_NOTES__ : [];
 
+/** 用 localStorage，保证房间更新后回首页/刷新仍不再提示同一版本 */
 const DISMISS_KEY = 'openmusic:update-dismissed-build';
 
 export function getDismissedUpdateBuildId(): string | null {
   try {
-    return sessionStorage.getItem(DISMISS_KEY);
+    return localStorage.getItem(DISMISS_KEY);
   } catch {
     return null;
   }
 }
 
 export function dismissUpdateForBuild(buildId: string): void {
+  const id = String(buildId || '').trim();
+  if (!id) return;
   try {
-    sessionStorage.setItem(DISMISS_KEY, buildId);
+    localStorage.setItem(DISMISS_KEY, id);
   } catch {
     // ignore
   }
