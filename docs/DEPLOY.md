@@ -59,6 +59,8 @@ npm start   # http://0.0.0.0:4000
 | `SESSION_TTL_SEC` | | 会话有效期（秒），默认 90 天；bootstrap 临近过期会静默续签 |
 | `TRUST_PROXY` | 生产推荐 | 设为 `1`：信任反代/CDN 回源头做限流与定位 |
 | `CLIENT_IP_HEADER` | 有 CDN 时必填 | CDN 回源真实客户端 IP 头名。Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp` |
+| `ALLOW_INSECURE_HTTP_API` | 否 | 设为 `1` 时允许普通 HTTP 跳过 API 请求签名；仅用于配置 HTTPS 前的临时直连，生产应保持 `0` |
+| `ALLOW_INSECURE_COOKIES` | 否 | 设为 `1` 时允许生产环境设置非 Secure 会话 Cookie；仅用于临时 HTTP 直连，应与上一项同时启停 |
 | `METING_API_URL` | 必填 | Meting-API 地址（向导或后台可改） |
 | `METING_API_AUTH` | 推荐 | Meting 的 `auth` 令牌 |
 | `CYAPI_KEY` | 可选 | 迟言 API Key（蓝点 + 随机推荐）；建议在后台填 |

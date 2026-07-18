@@ -37,6 +37,7 @@ export default function Setup() {
   const initialOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const [siteUrl, setSiteUrl] = useState(initialOrigin);
   const [trustProxy, setTrustProxy] = useState(true);
+  const [allowInsecureHttpAccess, setAllowInsecureHttpAccess] = useState(false);
   const [mode, setMode] = useState<RedisMode>('host');
   const [redisUrl, setRedisUrl] = useState('redis://127.0.0.1:6379/0');
   const [host, setHost] = useState('127.0.0.1');
@@ -105,6 +106,7 @@ export default function Setup() {
       const data = await setupFetch<SetupResult>('/api/setup/complete', {
         siteUrl: siteUrl.trim(),
         trustProxy,
+        allowInsecureHttpAccess,
         adminPath: adminPath.trim(),
         metingApiUrl: metingApiUrl.trim(),
         metingApiAuth: metingApiAuth.trim(),
@@ -323,6 +325,16 @@ export default function Setup() {
             onChange={setTrustProxy}
             label="使用 Nginx / 宝塔 / CDN 反向代理（推荐开启）"
           />
+          <AdminSwitch
+            checked={allowInsecureHttpAccess}
+            onChange={setAllowInsecureHttpAccess}
+            label="允许 HTTP 访问（关闭 API 请求签名，仅临时部署使用）"
+          />
+          {allowInsecureHttpAccess && (
+            <p className="text-xs text-amber-300/90">
+              此模式还会允许非 Secure 会话 Cookie，HTTP 流量可被窃听或篡改。完成 HTTPS 配置后请关闭。
+            </p>
+          )}
           <p className="text-xs text-netease-muted">
             将自动生成会话签名密钥、随机管理员账号密码、写入配置并锁定安装入口。
           </p>

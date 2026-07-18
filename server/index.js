@@ -144,6 +144,10 @@ const ALLOWED_ORIGINS = CLIENT_URL
 const CLIENT_ID_SECRET = process.env.CLIENT_ID_SECRET || randomBytes(32).toString('hex');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
+const ALLOW_INSECURE_HTTP_API = process.env.ALLOW_INSECURE_HTTP_API === '1'
+  || process.env.ALLOW_INSECURE_HTTP_API === 'true';
+const ALLOW_INSECURE_COOKIES = process.env.ALLOW_INSECURE_COOKIES === '1'
+  || process.env.ALLOW_INSECURE_COOKIES === 'true';
 /** 会话 HMAC 有效期（秒），默认 90 天 */
 const SESSION_TTL_SEC = Math.max(
   60 * 60 * 24,
@@ -240,9 +244,9 @@ app.use((req, res, next) => {
 
   req.apiIdentity = identity;
 
-  // Web Crypto 仅在 HTTPS/可信上下文可用；HTTP 直连阶段只能依赖会话校验。
-  // 上线 HTTPS 后 req.secure 为 true，自动恢复请求签名校验。
-  if (isApiSignRequired() && req.secure) {
+  // 仅当管理员显式允许时，HTTP 才降级为只校验会话；HTTPS 始终校验请求签名。
+  const requireRequestSign = req.secure || !ALLOW_INSECURE_HTTP_API;
+  if (isApiSignRequired() && requireRequestSign) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
     const result = verifyApiSign(req, signKey, identity.userId);
     if (!result.ok) {
@@ -961,9 +965,10 @@ function createServerClientId() {
 }
 
 function setIdentityCookieHeaders(res, userId, token, deviceId = null) {
-  // Secure Cookie 只能通过 HTTPS 保存。生产环境也允许先通过直连 HTTP
-  // 完成首次部署；反代正确传递 X-Forwarded-Proto 后 req.secure 会为 true。
-  const secure = res.req?.secure ? '; Secure' : '';
+  // 生产环境默认强制 Secure，避免反代漏传 X-Forwarded-Proto 时静默降级。
+  // 临时 HTTP 部署必须由管理员显式允许不安全 Cookie。
+  const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || res.req?.secure;
+  const secure = useSecureCookie ? '; Secure' : '';
   const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; SameSite=Lax${secure}`;
   const cookies = [
     `${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`,
@@ -1013,7 +1018,8 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
     // 聊天文本门禁密令密钥：始终下发，供前端敏感词检测通过后签发密令
     chatTextGateKey: deriveChatTextGateKey(CLIENT_ID_SECRET, userId, iat),
   };
-  if (isApiSignRequired() && res.req?.secure) {
+  const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
+  if (isApiSignRequired() && requireRequestSign) {
     payload.apiSignKey = deriveApiSignKey(CLIENT_ID_SECRET, userId, iat);
   }
   return res.json(payload);
