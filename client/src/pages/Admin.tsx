@@ -1793,12 +1793,12 @@ export default function Admin() {
                     {!up.disabled && !up.healthy && ` · 冷却 ${up.cooldownRemainingSec}s`}
                     {typeof up.lastProbeAgoSec === 'number' && ` · 探测 ${up.lastProbeAgoSec}s 前${up.lastProbeOk === false ? '（失败）' : ''}`}
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
                     <button
                       type="button"
                       disabled={upstreamBusyUrl === up.url || up.disabled || up.cooldownRemainingSec <= 0}
                       onClick={() => void resetUpstreamCooldown(up.url)}
-                      className="rounded-lg border border-white/10 px-2.5 py-1 text-[11px] text-netease-muted transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
+                      className="inline-flex h-7 min-w-[4.5rem] items-center justify-center rounded-lg border border-white/10 px-2.5 text-[11px] text-netease-muted transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
                     >
                       {upstreamBusyUrl === up.url ? <Loader2 className="h-3 w-3 animate-spin" /> : '重置冷却'}
                     </button>
@@ -1806,7 +1806,7 @@ export default function Admin() {
                       type="button"
                       disabled={upstreamBusyUrl === up.url}
                       onClick={() => void toggleUpstreamDisabled(up)}
-                      className={`rounded-lg border px-2.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${
+                      className={`inline-flex h-7 min-w-[4.5rem] items-center justify-center rounded-lg border px-2.5 text-[11px] transition-colors disabled:opacity-40 ${
                         up.disabled
                           ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
                           : 'border-amber-500/40 text-amber-400 hover:bg-amber-500/10'
