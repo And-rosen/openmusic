@@ -1115,7 +1115,12 @@ app.post('/api/rooms', (req, res) => {
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
     return res.status(403).json({ error: '你已被站点封禁，无法创建房间' });
   }
-  const room = createRoom({ name, password, creatorId: identity.userId });
+  const room = createRoom({
+    name,
+    password,
+    creatorId: identity.userId,
+    creatorDeviceId: createDeviceId,
+  });
   res.json(room);
 });
 
@@ -1569,7 +1574,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const auth = verifyRoomPassword(id, password, { clientId: userId });
+    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
+    const auth = verifyRoomPassword(id, password, { clientId: userId, deviceId });
     if (!auth.ok) {
       if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
         callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
@@ -1579,7 +1585,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
     // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
     // 站点封禁在密码校验前检查，避免被封用户反复试密码。
     const joinProbeIp = getClientIp(socket);

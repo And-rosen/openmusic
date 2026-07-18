@@ -190,6 +190,19 @@ export function verifyRoomPassword(roomId, password, options = {}) {
   if (!room) return { ok: false, error: '房间不存在' };
 
   const clientId = sanitizeCreatorId(options.clientId);
+  const deviceId = sanitizeCreatorId(options.deviceId);
+  if (
+    clientId
+    && deviceId
+    && room.creatorDeviceId === deviceId
+    && room.creatorId !== clientId
+  ) {
+    // 身份 Cookie 因重装/密钥轮换而变化时，以 HttpOnly 设备绑定恢复永久房主。
+    room.creatorId = clientId;
+    ensureAdminIds(room).delete(clientId);
+    ensureAutoPromotedAdminIds(room).delete(clientId);
+    persistRoom(room);
+  }
   // 原创建者始终可进：无密码上锁 / 有密码房均免密
   if (clientId && room.creatorId === clientId) {
     return { ok: true };
@@ -247,6 +260,7 @@ function snapshotRoomForStorage(room) {
     muteAll: Boolean(room.muteAll),
     mutedUserIds: Array.from(room.mutedUserIds || []),
     creatorId: room.creatorId ?? null,
+    creatorDeviceId: room.creatorDeviceId ?? null,
     bannedUserIds: Array.from(room.bannedUserIds || []),
     bannedDeviceIds: Array.from(room.bannedDeviceIds || []),
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
@@ -319,6 +333,7 @@ function restoreRoomFromStorage(data) {
   room.randomPlayedKeys = new Set(data.randomPlayedKeys || []);
   room.nextRandom = serializeSongMeta(data.nextRandom);
   room.creatorId = data.creatorId ?? null;
+  room.creatorDeviceId = sanitizeCreatorId(data.creatorDeviceId) || null;
   room.bannedUserIds = new Set(data.bannedUserIds || []);
   room.bannedDeviceIds = new Set(data.bannedDeviceIds || []);
   room.isLocked = Boolean(data.isLocked);
@@ -478,6 +493,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     muteAll: false,
     mutedUserIds: new Set(),
     creatorId: null,
+    creatorDeviceId: null,
     ownerId: null,
     bannedUserIds: new Set(),
     bannedDeviceIds: new Set(),
@@ -1085,7 +1101,7 @@ function getSongDurationSeconds(song) {
   return 0;
 }
 
-export function createRoom({ name, password, creatorId } = {}) {
+export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) {
   let roomId;
   do {
     roomId = generateRoomId();
@@ -1097,6 +1113,7 @@ export function createRoom({ name, password, creatorId } = {}) {
   const reservedCreator = sanitizeCreatorId(creatorId);
   if (reservedCreator) {
     room.creatorId = reservedCreator;
+    room.creatorDeviceId = sanitizeCreatorId(creatorDeviceId) || null;
   }
   rooms.set(roomId, room);
   persistRoom(room);
@@ -1372,6 +1389,11 @@ export function addUser(roomId, userId, nickname, options = {}) {
     deviceId: options.deviceId || existing?.deviceId || null,
     chatVisibleSince,
   });
+  const safeDeviceId = sanitizeCreatorId(deviceId);
+  if (room.creatorId === userId && safeDeviceId && !room.creatorDeviceId) {
+    // 兼容旧房间：原房主下一次正常进房时补记可信的 HttpOnly 设备身份。
+    room.creatorDeviceId = safeDeviceId;
+  }
   rememberUserNickname(room, userId, resolvedNickname);
 
   reassignOrphanQueueOwnership(room, userId, resolvedNickname);
