@@ -1605,6 +1605,11 @@ io.on('connection', (socket) => {
     setImmediate(() => {
       // 进房 ACK 已含完整快照，排除本人避免再收一次 40KB+ room_update
       broadcastRoomUpdate(id, { excludeSocketIds: [socket.id] });
+      // room_update 广播省略 location，需单独补发新成员的归属地给房内其他人，
+      // 否则他们要等自己退出重进才能看到（进房 ACK 才带全量 location）
+      if (location) {
+        socket.to(id).emit('user_location', { userId, location });
+      }
       if (welcomeMessage) {
         socket.to(id).emit('chat_message', welcomeMessage);
       }
