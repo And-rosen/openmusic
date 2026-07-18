@@ -58,6 +58,9 @@ function getAdminSetupStatus() {
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 小时
 const ADMIN_COOKIE = 'om_admin_sid';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const ALLOW_INSECURE_COOKIES = process.env.DEPLOYMENT_MODE === 'test'
+  || process.env.ALLOW_INSECURE_COOKIES === '1'
+  || process.env.ALLOW_INSECURE_COOKIES === 'true';
 const ADMIN_AUDIT_KEY = 'openmusic:admin:audit';
 /** Redis 保留最近 N 条；面板只展示前 50 条 */
 const AUDIT_MAX = 500;
@@ -123,19 +126,21 @@ function verifySession(req) {
   return { sid, ...session };
 }
 
-function adminCookieFlags(maxAgeSec) {
-  const secure = IS_PRODUCTION ? '; Secure' : '';
+function adminCookieFlags(maxAgeSec, req) {
+  // 与普通用户会话保持一致：生产模式强制 Secure，测试模式允许 HTTP。
+  const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || req?.secure;
+  const secure = useSecureCookie ? '; Secure' : '';
   // Path 限定管理 API，降低被同站其它路径带出的面；Strict 降低 CSRF 风险
   return `Path=/api/admin; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Strict${secure}`;
 }
 
 function setAdminSessionCookie(res, sid) {
   const maxAgeSec = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
-  res.append('Set-Cookie', `${ADMIN_COOKIE}=${encodeURIComponent(sid)}; ${adminCookieFlags(maxAgeSec)}`);
+  res.append('Set-Cookie', `${ADMIN_COOKIE}=${encodeURIComponent(sid)}; ${adminCookieFlags(maxAgeSec, res.req)}`);
 }
 
 function clearAdminSessionCookie(res) {
-  res.append('Set-Cookie', `${ADMIN_COOKIE}=; ${adminCookieFlags(0)}`);
+  res.append('Set-Cookie', `${ADMIN_COOKIE}=; ${adminCookieFlags(0, res.req)}`);
 }
 
 function audit(action, detail = {}, ip = '') {

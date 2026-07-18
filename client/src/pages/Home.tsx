@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Music, Users, Radio, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History, Download, Smartphone,
+  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History, Download, Smartphone, ShieldCheck,
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -227,6 +227,9 @@ export default function Home() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
+  const [showAdminEntry, setShowAdminEntry] = useState(false);
+  const [adminEntryPath, setAdminEntryPath] = useState('');
+  const [adminEntryError, setAdminEntryError] = useState('');
   const [createRoomName, setCreateRoomName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -353,6 +356,18 @@ export default function Home() {
 
   const inputCls = 'w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-netease-red/50 transition-colors';
 
+  const openAdminEntry = () => {
+    const raw = adminEntryPath.trim();
+    const path = raw.startsWith('/') ? raw : `/${raw}`;
+    if (!/^\/(?:admin|[A-Za-z0-9_-]{8,64})$/.test(path)) {
+      setAdminEntryError('请输入管理后台入口路径，例如 /AbCd1234');
+      return;
+    }
+    setShowAdminEntry(false);
+    setAdminEntryError('');
+    navigate(path);
+  };
+
   return (
     <div className="h-full flex flex-col relative overflow-hidden">
       <div className="absolute inset-0 bg-[#0a0a0a]" />
@@ -458,6 +473,22 @@ export default function Home() {
               aria-label="创建房间"
             >
               <Plus className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAdminEntryError(''); setShowAdminEntry(true); }}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-white/60 border border-white/10 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>管理</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAdminEntryError(''); setShowAdminEntry(true); }}
+              className="sm:hidden p-2.5 rounded-xl text-white/70 border border-white/10 hover:text-white hover:bg-white/5"
+              aria-label="管理后台"
+            >
+              <ShieldCheck className="w-4 h-4" />
             </button>
             {isMobileDevice() && (
               <Tooltip content="下载客户端">
@@ -658,6 +689,33 @@ export default function Home() {
           >
             {actionLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
             加入房间
+          </button>
+        </Modal>
+      )}
+
+      {showAdminEntry && (
+        <Modal title="进入管理后台" onClose={() => { setShowAdminEntry(false); setAdminEntryError(''); }}>
+          <p className="text-sm text-white/45 mb-4">
+            为避免公开随机管理地址，请输入后台中设置的入口路径。
+          </p>
+          <label className="block text-xs text-white/50 mb-1.5">管理入口路径</label>
+          <input
+            type="text"
+            value={adminEntryPath}
+            onChange={(e) => { setAdminEntryPath(e.target.value); setAdminEntryError(''); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') openAdminEntry(); }}
+            placeholder="例如 /AbCd1234"
+            autoComplete="off"
+            className={`${inputCls} mb-2 font-mono`}
+          />
+          {adminEntryError && <p className="mb-3 text-xs text-red-400">{adminEntryError}</p>}
+          <button
+            type="button"
+            onClick={openAdminEntry}
+            className="mt-2 w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white font-medium py-3 rounded-xl border border-white/10 transition-colors"
+          >
+            <ShieldCheck className="w-5 h-5" />
+            进入管理后台
           </button>
         </Modal>
       )}

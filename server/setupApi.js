@@ -16,6 +16,15 @@ const LOCK_PATH = path.join(__dirname, 'setup.lock');
 const ADMIN_CREDENTIALS_KEY = 'openmusic:admin:credentials';
 const attempts = new Map();
 
+function hasCompletedSetupLock() {
+  try {
+    const stat = fs.statSync(LOCK_PATH);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
 function hasLegacyConfiguration() {
   return Boolean(
     String(process.env.REDIS_URL || '').trim()
@@ -24,6 +33,11 @@ function hasLegacyConfiguration() {
 }
 
 function writeSetupLock(detail = {}) {
+  if (hasCompletedSetupLock()) {
+    const error = new Error('安装已完成');
+    error.code = 'EEXIST';
+    throw error;
+  }
   const payload = {
     installedAt: new Date().toISOString(),
     version: 1,
@@ -32,7 +46,8 @@ function writeSetupLock(detail = {}) {
   fs.writeFileSync(LOCK_PATH, `${JSON.stringify(payload, null, 2)}\n`, {
     encoding: 'utf8',
     mode: 0o600,
-    flag: 'wx',
+    // Docker 单文件挂载要求宿主机预先创建空文件，因此需允许覆盖空锁文件。
+    flag: fs.existsSync(LOCK_PATH) ? 'w' : 'wx',
   });
 }
 
@@ -41,7 +56,7 @@ function writeSetupLock(detail = {}) {
  * 只要已有 Redis 环境配置，就说明站点已经按旧流程部署，不能重新进入安装向导。
  */
 export function migrateLegacySetupLock() {
-  if (fs.existsSync(LOCK_PATH) || !hasLegacyConfiguration()) return;
+  if (hasCompletedSetupLock() || !hasLegacyConfiguration()) return;
   try {
     migrateLegacyAdminEntryConfig();
     writeSetupLock({ migrated: true });
@@ -54,7 +69,7 @@ export function migrateLegacySetupLock() {
 
 export function isSetupRequired() {
   // 即使运行目录暂时不可写、无法补建锁，也必须阻止旧站点暴露安装接口。
-  return !fs.existsSync(LOCK_PATH) && !hasLegacyConfiguration();
+  return !hasCompletedSetupLock() && !hasLegacyConfiguration();
 }
 
 function clientIp(req) {
@@ -171,7 +186,14 @@ function updateEnvFile(values) {
     encoding: 'utf8',
     mode: 0o600,
   });
-  fs.renameSync(temp, ENV_PATH);
+  try {
+    fs.renameSync(temp, ENV_PATH);
+  } catch (err) {
+    // Docker bind mount 的单文件挂载点不能被 rename 覆盖（Linux 返回 EBUSY）。
+    if (!['EBUSY', 'EPERM', 'EACCES'].includes(err?.code) || !fs.existsSync(ENV_PATH)) throw err;
+    fs.copyFileSync(temp, ENV_PATH);
+    fs.unlinkSync(temp);
+  }
 }
 
 async function createBootstrapCredentials(client, username, password, { mustChange = true } = {}) {

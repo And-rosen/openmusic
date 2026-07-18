@@ -298,7 +298,14 @@ export function setRuntimeConfig(raw = {}) {
     const forDisk = encodeForDisk(normalized);
     const tempPath = `${CONFIG_PATH}.${process.pid}.tmp`;
     fs.writeFileSync(tempPath, `${JSON.stringify(forDisk, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tempPath, CONFIG_PATH);
+    try {
+      fs.renameSync(tempPath, CONFIG_PATH);
+    } catch (err) {
+      // Docker 单文件 bind mount 不能被 rename 覆盖，回退为原位写入。
+      if (!['EBUSY', 'EPERM', 'EACCES'].includes(err?.code) || !fs.existsSync(CONFIG_PATH)) throw err;
+      fs.copyFileSync(tempPath, CONFIG_PATH);
+      fs.unlinkSync(tempPath);
+    }
     // 内存缓存保留明文，供运行时使用；磁盘为加密形态
     cached = { mtimeMs: fs.statSync(CONFIG_PATH).mtimeMs, persisted: normalized };
     return { success: true, config: getRuntimeConfigForAdmin() };
