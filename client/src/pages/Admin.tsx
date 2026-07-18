@@ -947,7 +947,7 @@ function RuntimeConfigPanel({ onError }: { onError: (message: string) => void })
           <>
             网易云 / QQ 音乐的搜索、播放、歌词与歌单导入。多个源轮询使用，故障自动切换。
             <br />
-            <span className="text-sky-300/80">ChKSz 源仅支持网易云，无需 Auth。</span>
+            <span className="text-sky-300/80">ChKSz 需要登录其官网获取个人 API Key，并填写到 Auth。</span>
           </>
         )}
       >
@@ -1019,7 +1019,7 @@ function RuntimeConfigPanel({ onError }: { onError: (message: string) => void })
                 }}
                 placeholder={source.configuredAuth
                   ? '清空保存则关闭 Auth'
-                  : `Auth 密钥${source.type === 'chksz' ? '（通常不需要）' : '，没有则留空'}`}
+                  : `Auth 密钥${source.type === 'chksz' ? '（填写 ChKSz API Key）' : '，没有则留空'}`}
                 aria-label={`音源 ${index + 1} Auth 密钥`}
                 autoComplete="off"
                 spellCheck={false}

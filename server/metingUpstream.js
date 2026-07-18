@@ -38,19 +38,21 @@ function syncUpstreams() {
     }
     if (hostname === 'api.chksz.com') style = 'chksz';
 
+    const auth = rawAuths.length === 1 ? rawAuths[0] : (rawAuths[i] || '');
     const old = previous.get(base);
+    const reuseHealth = old?.auth === auth && old?.style === style;
     return {
       base,
       style,
-      auth: rawAuths.length === 1 ? rawAuths[0] : (rawAuths[i] || ''),
+      auth,
       hostname,
-      cooldownUntil: old?.cooldownUntil || 0,
-      okCount: old?.okCount || 0,
-      failCount: old?.failCount || 0,
-      lastError: old?.lastError || '',
+      cooldownUntil: reuseHealth ? old.cooldownUntil : 0,
+      okCount: reuseHealth ? old.okCount : 0,
+      failCount: reuseHealth ? old.failCount : 0,
+      lastError: reuseHealth ? old.lastError : '',
       disabled: Boolean(old?.disabled),
-      lastProbeAt: old?.lastProbeAt || 0,
-      lastProbeOk: old?.lastProbeOk ?? null,
+      lastProbeAt: reuseHealth ? old.lastProbeAt : 0,
+      lastProbeOk: reuseHealth ? old.lastProbeOk : null,
     };
   });
   upstreamSignature = signature;
@@ -174,7 +176,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   for (const upstream of candidates) {
     try {
       const response = upstream.style === 'chksz'
-        ? await fetchChksz(upstream.base, query, timeoutMs)
+        ? await fetchChksz(upstream.base, query, timeoutMs, upstream.auth)
         : await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
       // 404 视为正常的“歌曲不存在”业务结果；其余 4xx/5xx 视为上游故障并触发切换
       if (response.status >= 400 && response.status !== 404) {
@@ -246,7 +248,7 @@ async function probeUpstream(upstream) {
   upstream.lastProbeAt = Date.now();
   try {
     const response = upstream.style === 'chksz'
-      ? await fetchChksz(upstream.base, PROBE_QUERY, PROBE_TIMEOUT_MS)
+      ? await fetchChksz(upstream.base, PROBE_QUERY, PROBE_TIMEOUT_MS, upstream.auth)
       : await fetchMeting(buildUpstreamUrl(upstream, PROBE_QUERY), {}, PROBE_TIMEOUT_MS);
     if (response.status >= 400 && response.status !== 404) {
       markFailure(upstream, `健康探测返回 ${response.status}`);

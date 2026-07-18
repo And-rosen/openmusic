@@ -329,6 +329,18 @@ export function mountSetupApi(app) {
     }
     const metingApiAuth = cleanText(req.body?.metingApiAuth, 1024);
     if (metingApiAuth === null) return res.status(400).json({ error: 'Meting 令牌无效' });
+    const chkszApiKey = cleanText(req.body?.chkszApiKey, 1024);
+    if (chkszApiKey === null) return res.status(400).json({ error: 'ChKSz API Key 无效' });
+    const metingAuths = metingSources.map((source) => {
+      const rawUrl = source.toLowerCase().startsWith('chksz:') ? source.slice(6).trim() : source;
+      let isChksz = source.toLowerCase().startsWith('chksz:');
+      try {
+        isChksz ||= new URL(rawUrl).hostname.toLowerCase() === 'api.chksz.com';
+      } catch {
+        // 地址已在前面校验，此处仅做类型识别
+      }
+      return isChksz ? chkszApiKey : metingApiAuth;
+    });
 
     const result = await connectRedis(req.body?.redis);
     if (result.error) return res.status(400).json({ error: result.error });
@@ -347,7 +359,7 @@ export function mountSetupApi(app) {
         TRUST_PROXY: req.body?.trustProxy === false ? '0' : '1',
         DEPLOYMENT_MODE: req.body?.testMode === true ? 'test' : 'production',
         METING_API_URL: metingSources.join(','),
-        METING_API_AUTH: metingApiAuth,
+        METING_API_AUTH: metingAuths.some(Boolean) ? metingAuths.join(',') : '',
         SETUP_NONCE: setupNonce,
       });
       clearPersistedMetingOverrides();

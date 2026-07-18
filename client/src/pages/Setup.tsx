@@ -47,6 +47,7 @@ export default function Setup() {
   const [database, setDatabase] = useState('0');
   const [metingApiUrl, setMetingApiUrl] = useState('http://127.0.0.1:3000');
   const [chkszApiUrl, setChkszApiUrl] = useState('https://api.chksz.com');
+  const [chkszApiKey, setChkszApiKey] = useState('');
   const [metingApiAuth, setMetingApiAuth] = useState('');
   const [adminPath, setAdminPath] = useState(() => randomAdminPath());
   const [testing, setTesting] = useState(false);
@@ -111,6 +112,7 @@ export default function Setup() {
         adminPath: adminPath.trim(),
         metingApiUrl: metingApiUrl.trim(),
         chkszApiUrl: chkszApiUrl.trim(),
+        chkszApiKey: chkszApiKey.trim(),
         metingApiAuth: metingApiAuth.trim(),
         redis,
       });
@@ -297,8 +299,14 @@ export default function Setup() {
               value={metingApiAuth}
               onChange={setMetingApiAuth}
             />
+            <SetupField
+              label="ChKSz API Key"
+              value={chkszApiKey}
+              onChange={setChkszApiKey}
+              password
+            />
             <p className="text-xs text-netease-muted">
-              两类音源会同时保存并参与轮询与故障切换；ChKSz 通常无需 Auth。任一项可留空，也可稍后在管理后台「运行配置」中增删更多音源。
+              两类音源会同时保存并参与轮询与故障切换；ChKSz 需登录其官网获取个人 API Key。任一音源可留空，稍后在管理后台补充。
             </p>
           </div>
         </div>
