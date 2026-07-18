@@ -118,7 +118,8 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
       const response = upstream.style === 'chksz'
         ? await fetchChksz(upstream.base, query, timeoutMs)
         : await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
-      if (response.status >= 500) {
+      // 404 视为正常的“歌曲不存在”业务结果；其余 4xx/5xx 视为上游故障并触发切换
+      if (response.status >= 400 && response.status !== 404) {
         markFailure(upstream, `上游返回 ${response.status}`);
         lastError = new Error(`Meting 上游返回 ${response.status}（${upstream.base}）`);
         continue;

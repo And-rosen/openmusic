@@ -105,8 +105,12 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
   app.delete('/api/admin/rooms/:id', requireAdmin, (req, res) => {
     const roomId = String(req.params.id || '').toUpperCase();
     // 先把房内连接踢出，避免解散后客户端仍持有旧状态
+    // 先收集再删除，避免在遍历 Map 的同时修改它
+    const sidsToKick = [];
     for (const [sid, rid] of socketToRoom.entries()) {
-      if (rid !== roomId) continue;
+      if (rid === roomId) sidsToKick.push(sid);
+    }
+    for (const sid of sidsToKick) {
       const s = io.sockets.sockets.get(sid);
       socketToRoom.delete(sid);
       socketToUserId.delete(sid);

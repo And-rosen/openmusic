@@ -1149,9 +1149,10 @@ export function adminDestroyRoom(roomId) {
   clearSkipRequestExpiryTimersForRoom(id);
   rooms.delete(id);
   invalidateRoomsListCache();
-  void deleteRoomChatImages(id).finally(() => {
-    void deleteRoomFromStorage(id);
-  });
+  deleteRoomChatImages(id)
+    .catch((err) => console.error(`删除房间 ${id} 聊天图片失败:`, err))
+    .then(() => deleteRoomFromStorage(id))
+    .catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
   return { success: true, name };
 }
 

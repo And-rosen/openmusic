@@ -5,7 +5,15 @@ import http from 'node:http';
 const metingHosts = new Set(
   String(process.env.METING_API_URL || '')
     .split(',')
-    .map((s) => s.trim().replace(/\/$/, ''))
+    .map((s) => {
+      let base = s.trim();
+      // chksz: 前缀标记的上游由 chkszAdapter.js 走独立请求路径，不经过这里；
+      // 剥离前缀只是为了让 hostname 解析不因非标准协议前缀失败
+      if (base.toLowerCase().startsWith('chksz:')) {
+        base = base.slice('chksz:'.length).trim();
+      }
+      return base.replace(/\/$/, '');
+    })
     .filter(Boolean)
     .map((base) => {
       try {

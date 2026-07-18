@@ -70,7 +70,11 @@ async function chkszGet(base, path, params, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${base}${path}?${search.toString()}`, { signal: controller.signal });
-    if (!res.ok) throw new Error(`chksz 上游返回 ${res.status}`);
+    // chksz 对“未找到”场景会用 HTTP 404 承载 { code: 404, msg: ... } 正常业务 JSON；
+    // 只有非 404 的非 2xx（网关错误、无 JSON 体等）才视为传输层故障
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`chksz 上游返回 ${res.status}`);
+    }
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -78,18 +82,32 @@ async function chkszGet(base, path, params, timeoutMs) {
 }
 
 function requireData(payload) {
+  if (!payload) {
+    throw new Error('chksz 返回空响应');
+  }
   // 部分接口（如 163_playlist）不带 code 字段，仅返回 data
-  if (!payload || (payload.code !== undefined && payload.code !== 200) || !payload.data) {
-    throw Object.assign(
-      new Error(String(payload?.msg || 'chksz 返回异常')),
-      { chkszNotFound: true },
-    );
+  if ((payload.code !== undefined && payload.code !== 200) || !payload.data) {
+    const err = new Error(String(payload?.msg || 'chksz 返回异常'));
+    // code >= 500 是上游系统级故障，不能当作“歌曲不存在”吞掉，否则会被判定为成功、放弃故障切换
+    const isSystemError = payload.code !== undefined && payload.code >= 500;
+    if (!isSystemError) {
+      err.chkszNotFound = true;
+    }
+    throw err;
   }
   return payload.data;
 }
 
 function resolveLevel(quality) {
   return QUALITY_TO_LEVEL[String(quality || '').toLowerCase()] || 'exhigh';
+}
+
+// artists 通常已是拼接好的字符串，但网易云风格接口也可能返回 [{ name }] 数组
+function normalizeArtistField(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((a) => (a && typeof a === 'object' ? a.name : a)).filter(Boolean).join(' / ');
+  }
+  return String(raw || '');
 }
 
 async function handleSearch(base, keyword, timeoutMs) {
@@ -99,7 +117,7 @@ async function handleSearch(base, keyword, timeoutMs) {
   const songs = list.map((item) => ({
     id: String(item.id || ''),
     name: String(item.name || ''),
-    artist: String(item.artists || item.artist || ''),
+    artist: normalizeArtistField(item.artists || item.artist),
     album: String(item.album || ''),
     pic: String(item.picUrl || ''),
     // 客户端 duration 语义为毫秒，chksz 原值即毫秒
@@ -147,7 +165,10 @@ async function handlePic(base, id, timeoutMs) {
 async function handleLrc(base, id, timeoutMs) {
   const payload = await chkszGet(base, '/api/163_lyric', { id }, timeoutMs);
   const data = requireData(payload);
-  return makeResponse(200, 'text/plain; charset=utf-8', String(data.lrc || ''));
+  // lrc 通常已是字符串，但网易云风格接口也可能返回 { lyric: "..." } 对象
+  const lrc = data.lrc;
+  const lrcText = lrc && typeof lrc === 'object' ? String(lrc.lyric || '') : String(lrc || '');
+  return makeResponse(200, 'text/plain; charset=utf-8', lrcText);
 }
 
 async function handlePlaylist(base, id, timeoutMs) {
