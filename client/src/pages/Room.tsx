@@ -394,6 +394,8 @@ export default function Room() {
   const songRequestSettings: SongRequestSettings = useMemo(() => ({
     enabled: room?.songRequestEnabled !== false,
     memberJumpEnabled: Boolean(room?.memberJumpEnabled),
+    memberSeekEnabled: Boolean(room?.memberSeekEnabled),
+    memberPauseEnabled: Boolean(room?.memberPauseEnabled),
     systemMediaPlayBound: room?.systemMediaPlayBound !== false,
     systemMediaSkipBound: room?.systemMediaSkipBound !== false,
     dislikeSkipMode: normalizeDislikeSkipMode(room?.dislikeSkipMode),
@@ -408,6 +410,8 @@ export default function Room() {
   }), [
     room?.songRequestEnabled,
     room?.memberJumpEnabled,
+    room?.memberSeekEnabled,
+    room?.memberPauseEnabled,
     room?.systemMediaPlayBound,
     room?.systemMediaSkipBound,
     room?.dislikeSkipMode,
@@ -1095,6 +1099,8 @@ export default function Room() {
     const res = await setSongRequestEnabled({
       enabled: settings.enabled,
       memberJumpEnabled: settings.memberJumpEnabled,
+      memberSeekEnabled: settings.memberSeekEnabled,
+      memberPauseEnabled: settings.memberPauseEnabled,
       systemMediaPlayBound: settings.systemMediaPlayBound,
       systemMediaSkipBound: settings.systemMediaSkipBound,
       dislikeSkipMode: settings.dislikeSkipMode,
@@ -2041,6 +2047,7 @@ export default function Room() {
         isOwner={isOwner}
         canModerate={canModerate}
         fmMode={normalizeFmMode(room?.neteaseFmMode)}
+        fmModeBeforeOff={room?.fmModeBeforeOff}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
         announcementText={room?.announcementText || ''}

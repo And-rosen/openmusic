@@ -4,6 +4,7 @@ import { Play, Pause, SkipForward, ChevronUp, Loader2 } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
+import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
 
 import SourceBadge from './SourceBadge';
 import SongCover from './SongCover';
@@ -33,7 +34,7 @@ export default memo(function MiniPlayer({
   variant = 'default',
 }: Props) {
 
-  const { current, isPlaying, fmLoading, skipRequests, hasRoom } = useRoomStore(useShallow((s) => {
+  const { current, isPlaying, fmLoading, skipRequests, hasRoom, canSeek, canPause } = useRoomStore(useShallow((s) => {
     const r = s.room;
     return {
       current: r?.current ?? null,
@@ -41,6 +42,8 @@ export default memo(function MiniPlayer({
       fmLoading: Boolean(r?.randomLoading && !r?.current),
       skipRequests: r?.skipRequests,
       hasRoom: Boolean(r),
+      canSeek: canSeekInRoom(r, s.canControlPlayback),
+      canPause: canPauseInRoom(r, s.canControlPlayback),
     };
   }));
 
@@ -140,7 +143,7 @@ export default memo(function MiniPlayer({
         <PlaybackProgressBar
           song={current}
           onSeek={handleSeek}
-          disabled={!canControlPlayback}
+          disabled={!canSeek}
           variant="mineradio"
         />
         <div className="mineradio-controls">
@@ -165,11 +168,11 @@ export default memo(function MiniPlayer({
           </div>
 
           <div className="control-cluster transport">
-            <Tooltip content={canControlPlayback ? '暂停/播放' : isPlaying ? '房主正在播放' : '房主已暂停'}>
+            <Tooltip content={canPause ? '暂停/播放' : isPlaying ? '房主正在播放' : '房主已暂停'}>
               <button
                 type="button"
-                onClick={canControlPlayback ? handlePlayPause : undefined}
-                disabled={trackLoading || !canControlPlayback}
+                onClick={canPause ? handlePlayPause : undefined}
+                disabled={trackLoading || !canPause}
                 className="mineradio-play-btn"
                 aria-label="播放控制"
               >
@@ -293,7 +296,7 @@ export default memo(function MiniPlayer({
         <PlaybackProgressBar
           song={current}
           onSeek={handleSeek}
-          disabled={!canControlPlayback}
+          disabled={!canSeek}
           className="h-0.5"
           trackClassName="bg-netease-border"
           fillClassName="bg-netease-red"
@@ -349,11 +352,11 @@ export default memo(function MiniPlayer({
 
 
 
-        <Tooltip content={canControlPlayback ? '暂停/播放' : (isPlaying ? '房主正在播放' : '房主已暂停')}>
+        <Tooltip content={canPause ? '暂停/播放' : (isPlaying ? '房主正在播放' : '房主已暂停')}>
           <button
-            onClick={canControlPlayback ? handlePlayPause : undefined}
-            disabled={trackLoading || !canControlPlayback}
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-all disabled:opacity-70 ${canControlPlayback ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
+            onClick={canPause ? handlePlayPause : undefined}
+            disabled={trackLoading || !canPause}
+            className={`w-9 h-9 flex items-center justify-center rounded-full transition-all disabled:opacity-70 ${canPause ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
             aria-label="播放控制"
           >
             {trackLoading ? (

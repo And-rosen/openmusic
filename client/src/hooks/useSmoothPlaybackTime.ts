@@ -5,6 +5,7 @@ import { useAudioStore } from '../stores/audioStore';
 import { resolveDisplayDurationSeconds } from '../hooks/useTrackDuration';
 import { getClientPlaybackState, getPlaybackTime } from '../lib/playbackState';
 import { getSharedAudio } from '../lib/audioElement';
+import { canSeekInRoom } from '../lib/roomPermissions';
 import type { Song, QueueItem } from '../types';
 
 type TimeCapSong = Pick<Song, 'duration' | 'id' | 'source'> & Partial<Pick<QueueItem, 'queueId'>>;
@@ -48,10 +49,11 @@ function readAudioCurrentTime(song: TimeCapSong | null | undefined): number | nu
   return capSongTime(audio.currentTime, song);
 }
 
-/** 听众以房间播放时钟为准，避免本机误拖进度条后 UI 跟着跑偏 */
+/** 无拖进度权限时以房间播放时钟为准，避免本机误拖后 UI 跑偏 */
 function resolveDisplayedPlaybackTime(song: TimeCapSong | null | undefined): number | null {
   if (!song || !stateMatchesSong(song)) return null;
-  if (!useRoomStore.getState().canControlPlayback) {
+  const { room, canControlPlayback } = useRoomStore.getState();
+  if (!canSeekInRoom(room, canControlPlayback)) {
     const state = getClientPlaybackState();
     if (!state) return null;
     return capSongTime(getPlaybackTime(state), song);

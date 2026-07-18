@@ -24,6 +24,7 @@ import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 import AmbientCoverLayers from './AmbientCoverLayers';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
+import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
 
 
 
@@ -43,6 +44,8 @@ export default memo(function PlayerPage({ onClose }: Props) {
   const room = useRoomStore((s) => s.room);
 
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
+  const canSeek = canSeekInRoom(room, canControlPlayback);
+  const canPause = canPauseInRoom(room, canControlPlayback);
   const trackLoading = useAudioStore((s) => s.trackLoading);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
@@ -178,7 +181,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
 
           <SyncedLyricsPane
             lines={lyrics}
-            onSeek={canControlPlayback ? handleSeek : undefined}
+            onSeek={canSeek ? handleSeek : undefined}
             variant="side"
             size="large"
             scrollable
@@ -201,7 +204,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
           <PlaybackProgressBar
             song={current}
             onSeek={handleSeek}
-            disabled={!canControlPlayback}
+            disabled={!canSeek}
             className="h-1.5 2xl:h-2.5"
             trackClassName="bg-white/20"
             fillClassName="bg-white"
@@ -225,11 +228,11 @@ export default memo(function PlayerPage({ onClose }: Props) {
             iconClassName="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8"
           />
 
-          <Tooltip content={canControlPlayback ? '暂停/播放' : (isPlaying ? '正在播放' : '已暂停')}>
+          <Tooltip content={canPause ? '暂停/播放' : (isPlaying ? '正在播放' : '已暂停')}>
             <button
-              onClick={canControlPlayback ? handlePlayPause : undefined}
-              disabled={trackLoading || !canControlPlayback}
-              className={`w-14 h-14 sm:w-16 sm:h-16 2xl:w-24 2xl:h-24 flex items-center justify-center rounded-full transition-all shadow-lg shadow-black/30 disabled:opacity-80 ${canControlPlayback ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
+              onClick={canPause ? handlePlayPause : undefined}
+              disabled={trackLoading || !canPause}
+              className={`w-14 h-14 sm:w-16 sm:h-16 2xl:w-24 2xl:h-24 flex items-center justify-center rounded-full transition-all shadow-lg shadow-black/30 disabled:opacity-80 ${canPause ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
               aria-label="播放控制"
             >
               {trackLoading ? (

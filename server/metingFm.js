@@ -3,6 +3,9 @@ import { fetchMetingApi } from './metingUpstream.js';
 
 export const DEFAULT_FM_MODE = 'DEFAULT';
 
+/** 关闭漫游：队列放空后停止播放，不自动推荐 */
+export const FM_MODE_OFF = 'OFF';
+
 const FM_MODES = new Set([
   'DEFAULT',
   'FAMILIAR',
@@ -12,6 +15,7 @@ const FM_MODES = new Set([
   'SCENE_RCMD:EXERCISE',
   'SCENE_RCMD:FOCUS',
   'SCENE_RCMD:NIGHT_EMO',
+  FM_MODE_OFF,
 ]);
 
 
@@ -81,6 +85,7 @@ function sleep(ms) {
 
 /** 网易云私人漫游（Meting type=fm） */
 export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE) {
+  if (normalizeFmMode(fmMode) === FM_MODE_OFF) return null;
   if (Date.now() < fmFailureCooldownUntil) return null;
 
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {

@@ -5,6 +5,16 @@ export function canModerateRoom(isOwner: boolean, isAdmin: boolean): boolean {
   return isOwner || isAdmin;
 }
 
+/** 房主/管理员始终可；开启 memberSeekEnabled 后普通成员也可拖进度条 */
+export function canSeekInRoom(room: RoomState | null | undefined, canControlPlayback: boolean): boolean {
+  return canControlPlayback || Boolean(room?.memberSeekEnabled);
+}
+
+/** 房主/管理员始终可；开启 memberPauseEnabled 后普通成员也可暂停/播放 */
+export function canPauseInRoom(room: RoomState | null | undefined, canControlPlayback: boolean): boolean {
+  return canControlPlayback || Boolean(room?.memberPauseEnabled);
+}
+
 export function canRequestSong(
   room: RoomState | null,
   isOwner: boolean,

@@ -1,6 +1,6 @@
 import { customAlphabet } from 'nanoid';
 import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
-import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE } from './metingFm.js';
+import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from './metingFm.js';
 import {
   initRoomStorage,
   isRedisEnabled,
@@ -276,6 +276,7 @@ function snapshotRoomForStorage(room) {
     userNicknames: Object.fromEntries(room.userNicknames || []),
     audioQuality: room.audioQuality ?? { netease: 'hires', tencent: 'lossless' },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
@@ -285,6 +286,8 @@ function snapshotRoomForStorage(room) {
     songRequestCooldownSec: normalizeSongRequestCooldownSec(room.songRequestCooldownSec),
     queueMaxLength: normalizeQueueMaxLength(room.queueMaxLength),
     memberJumpEnabled: Boolean(room.memberJumpEnabled),
+    memberSeekEnabled: Boolean(room.memberSeekEnabled),
+    memberPauseEnabled: Boolean(room.memberPauseEnabled),
     systemMediaPlayBound: room.systemMediaPlayBound !== false,
     systemMediaSkipBound: room.systemMediaSkipBound !== false,
     dislikeSkipMode: normalizeDislikeSkipMode(room.dislikeSkipMode),
@@ -331,6 +334,8 @@ function restoreRoomFromStorage(data) {
   room.userNicknames = new Map(Object.entries(data.userNicknames || {}));
   room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.neteaseFmMode = normalizeFmMode(data.neteaseFmMode);
+  const fmModeBeforeOff = normalizeFmMode(data.fmModeBeforeOff);
+  room.fmModeBeforeOff = fmModeBeforeOff === FM_MODE_OFF ? DEFAULT_FM_MODE : fmModeBeforeOff;
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH);
   room.chatHistoryVisibleOnJoin = Boolean(data.chatHistoryVisibleOnJoin);
@@ -340,6 +345,8 @@ function restoreRoomFromStorage(data) {
   room.songRequestCooldownSec = normalizeSongRequestCooldownSec(data.songRequestCooldownSec);
   room.queueMaxLength = normalizeQueueMaxLength(data.queueMaxLength);
   room.memberJumpEnabled = Boolean(data.memberJumpEnabled);
+  room.memberSeekEnabled = Boolean(data.memberSeekEnabled);
+  room.memberPauseEnabled = Boolean(data.memberPauseEnabled);
   room.systemMediaPlayBound = data.systemMediaPlayBound !== false;
   room.systemMediaSkipBound = data.systemMediaSkipBound !== false;
   room.dislikeSkipMode = normalizeDislikeSkipMode(data.dislikeSkipMode);
@@ -501,6 +508,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
       tencent: 'lossless',
     },
     neteaseFmMode: DEFAULT_FM_MODE,
+    fmModeBeforeOff: DEFAULT_FM_MODE,
     announcementEnabled: false,
     announcementText: '',
     /** 进房是否可查看历史聊天；默认关闭（仅看进房后的消息） */
@@ -511,6 +519,10 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     songRequestCooldownSec: 0,
     queueMaxLength: DEFAULT_QUEUE_MAX_LENGTH,
     memberJumpEnabled: false,
+    /** 是否允许成员拖动进度条（默认关闭，房主/管理员始终可） */
+    memberSeekEnabled: false,
+    /** 是否允许成员暂停/播放（默认关闭，房主/管理员始终可） */
+    memberPauseEnabled: false,
     systemMediaPlayBound: true,
     systemMediaSkipBound: true,
     dislikeSkipMode: DEFAULT_DISLIKE_SKIP_MODE,
@@ -1438,6 +1450,10 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null) {
     return { room: serializeRoom(room) };
   }
 
+  // 记住关闭前的模式，重新开启时恢复
+  if (nextMode === FM_MODE_OFF && room.neteaseFmMode !== FM_MODE_OFF) {
+    room.fmModeBeforeOff = normalizeFmMode(room.neteaseFmMode);
+  }
   room.neteaseFmMode = nextMode;
   clearNextRandom(room);
   persistRoom(room);
@@ -1746,6 +1762,12 @@ export function setSongRequestEnabled(roomId, actorId, options = {}, connectionI
   if (options.memberJumpEnabled !== undefined) {
     room.memberJumpEnabled = Boolean(options.memberJumpEnabled);
   }
+  if (options.memberSeekEnabled !== undefined) {
+    room.memberSeekEnabled = Boolean(options.memberSeekEnabled);
+  }
+  if (options.memberPauseEnabled !== undefined) {
+    room.memberPauseEnabled = Boolean(options.memberPauseEnabled);
+  }
   if (options.systemMediaPlayBound !== undefined) {
     room.systemMediaPlayBound = Boolean(options.systemMediaPlayBound);
   }
@@ -2040,6 +2062,20 @@ function isControllerConnection(room, userId, connectionId = null) {
   if (!canControlPlayback(room, userId)) return false;
   if (!isActorConnection(room, userId, connectionId)) return false;
   return true;
+}
+
+/** 房主/管理员始终可；开启 memberSeekEnabled 后普通成员也可调进度 */
+function canSeekPlayback(room, userId, connectionId = null) {
+  if (isControllerConnection(room, userId, connectionId)) return true;
+  if (!room.memberSeekEnabled) return false;
+  return isActorConnection(room, userId, connectionId);
+}
+
+/** 房主/管理员始终可；开启 memberPauseEnabled 后普通成员也可暂停/播放 */
+function canPausePlayback(room, userId, connectionId = null) {
+  if (isControllerConnection(room, userId, connectionId)) return true;
+  if (!room.memberPauseEnabled) return false;
+  return isActorConnection(room, userId, connectionId);
 }
 
 function songIdentity(source, id) {
@@ -2346,6 +2382,11 @@ async function ensureNextRandom(room) {
     clearNextRandom(room);
     return;
   }
+  // 漫游已关闭：不预取，队列放空后自然停止
+  if ((room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF) {
+    clearNextRandom(room);
+    return;
+  }
   if (room.nextRandom || room.nextRandomPromise) return;
 
   room.nextRandomPromise = (async () => {
@@ -2485,7 +2526,8 @@ async function playNextUnlocked(room, options = {}) {
   room.isPlaying = false;
   room.currentTime = 0;
   room.startedAt = null;
-  room.randomLoading = true;
+  // 漫游关闭时干净停机，不进入"漫游加载中"重试
+  room.randomLoading = (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
   bumpPlaybackState(room);
 }
 
@@ -2629,7 +2671,7 @@ export async function advancePlaybackIfEnded(roomId, options = {}) {
 export function setPlaying(roomId, socketId, isPlaying, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room || !room.current) return null;
-  if (!isControllerConnection(room, socketId, connectionId)) return null;
+  if (!canPausePlayback(room, socketId, connectionId)) return null;
 
   room.isPlaying = isPlaying;
   if (isPlaying) {
@@ -2650,7 +2692,7 @@ export function setPlaying(roomId, socketId, isPlaying, connectionId = null) {
 export function seekTo(roomId, socketId, time, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room || !room.current) return null;
-  if (!isControllerConnection(room, socketId, connectionId)) return null;
+  if (!canSeekPlayback(room, socketId, connectionId)) return null;
 
   const nextTime = Number(time);
   if (!Number.isFinite(nextTime) || nextTime < 0) return null;
@@ -3398,6 +3440,7 @@ function serializeRoom(room, options = {}) {
     randomLoading: Boolean(room.randomLoading),
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
@@ -3407,6 +3450,8 @@ function serializeRoom(room, options = {}) {
     songRequestCooldownSec: normalizeSongRequestCooldownSec(room.songRequestCooldownSec),
     queueMaxLength: normalizeQueueMaxLength(room.queueMaxLength),
     memberJumpEnabled: Boolean(room.memberJumpEnabled),
+    memberSeekEnabled: Boolean(room.memberSeekEnabled),
+    memberPauseEnabled: Boolean(room.memberPauseEnabled),
     systemMediaPlayBound: room.systemMediaPlayBound !== false,
     systemMediaSkipBound: room.systemMediaSkipBound !== false,
     dislikeSkipMode: normalizeDislikeSkipMode(room.dislikeSkipMode),
@@ -3450,6 +3495,7 @@ export function prepareRoomBroadcast(roomId) {
     randomLoading: Boolean(room.randomLoading),
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
@@ -3459,6 +3505,8 @@ export function prepareRoomBroadcast(roomId) {
     songRequestCooldownSec: normalizeSongRequestCooldownSec(room.songRequestCooldownSec),
     queueMaxLength: normalizeQueueMaxLength(room.queueMaxLength),
     memberJumpEnabled: Boolean(room.memberJumpEnabled),
+    memberSeekEnabled: Boolean(room.memberSeekEnabled),
+    memberPauseEnabled: Boolean(room.memberPauseEnabled),
     systemMediaPlayBound: room.systemMediaPlayBound !== false,
     systemMediaSkipBound: room.systemMediaSkipBound !== false,
     dislikeSkipMode: normalizeDislikeSkipMode(room.dislikeSkipMode),

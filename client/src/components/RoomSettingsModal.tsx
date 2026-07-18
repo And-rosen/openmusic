@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Minus, Plus, Sparkles, X } from 'lucide-react';
-import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode } from '../api/music/fmMode';
+import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
 import type { BannedSong } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
@@ -19,6 +19,8 @@ type SettingsTab = 'fm' | 'member' | 'announcement' | 'chat' | 'songRequest';
 export interface SongRequestSettings {
   enabled: boolean;
   memberJumpEnabled: boolean;
+  memberSeekEnabled: boolean;
+  memberPauseEnabled: boolean;
   systemMediaPlayBound: boolean;
   systemMediaSkipBound: boolean;
   dislikeSkipMode: DislikeSkipMode;
@@ -35,6 +37,8 @@ export interface SongRequestSettings {
 function songRequestEqual(a: SongRequestSettings, b: SongRequestSettings) {
   return a.enabled === b.enabled
     && a.memberJumpEnabled === b.memberJumpEnabled
+    && a.memberSeekEnabled === b.memberSeekEnabled
+    && a.memberPauseEnabled === b.memberPauseEnabled
     && a.systemMediaPlayBound === b.systemMediaPlayBound
     && a.systemMediaSkipBound === b.systemMediaSkipBound
     && a.dislikeSkipMode === b.dislikeSkipMode
@@ -53,6 +57,7 @@ interface Props {
   isOwner: boolean;
   canModerate: boolean;
   fmMode: string;
+  fmModeBeforeOff?: string;
   fmSaving?: boolean;
   announcementEnabled: boolean;
   announcementText: string;
@@ -184,6 +189,7 @@ export default function RoomSettingsModal({
   isOwner,
   canModerate,
   fmMode,
+  fmModeBeforeOff,
   fmSaving = false,
   announcementEnabled,
   announcementText,
@@ -284,6 +290,8 @@ export default function RoomSettingsModal({
     || draftAnnouncementText.trim() !== announcementText.trim();
   const songRequestDirty = draftSongRequest.enabled !== songRequest.enabled
     || draftSongRequest.memberJumpEnabled !== songRequest.memberJumpEnabled
+    || draftSongRequest.memberSeekEnabled !== songRequest.memberSeekEnabled
+    || draftSongRequest.memberPauseEnabled !== songRequest.memberPauseEnabled
     || draftSongRequest.systemMediaPlayBound !== songRequest.systemMediaPlayBound
     || draftSongRequest.systemMediaSkipBound !== songRequest.systemMediaSkipBound
     || draftSongRequest.dislikeSkipMode !== songRequest.dislikeSkipMode
@@ -350,15 +358,22 @@ export default function RoomSettingsModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {activeTab === 'fm' && isOwner && (
             <section>
-              <p className="mb-3 text-xs text-netease-muted">
-                队列为空时通过私人漫游自动推荐下一首
-              </p>
-              <div className="space-y-1.5">
+              <Toggle
+                checked={currentFm !== FM_MODE_OFF}
+                disabled={fmSaving}
+                onChange={(next) => {
+                  const restored = normalizeFmMode(fmModeBeforeOff);
+                  onSaveFmMode(next ? (restored === FM_MODE_OFF ? DEFAULT_FM_MODE : restored) : FM_MODE_OFF);
+                }}
+                label="自动漫游"
+                description="队列为空时通过私人漫游自动推荐下一首"
+              />
+              <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
                 {NETEASE_FM_MODE_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
-                    disabled={fmSaving}
+                    disabled={fmSaving || currentFm === FM_MODE_OFF}
                     onClick={() => onSaveFmMode(opt.value)}
                     className={`w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
                       currentFm === opt.value
@@ -485,6 +500,22 @@ export default function RoomSettingsModal({
                   onChange={(memberJumpEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberJumpEnabled }))}
                   label="允许成员插队"
                   description="开启后成员可对自己的点歌插队；房主与管理员始终可插队"
+                />
+
+                <Toggle
+                  checked={draftSongRequest.memberSeekEnabled}
+                  disabled={songRequestSaving}
+                  onChange={(memberSeekEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberSeekEnabled }))}
+                  label="允许成员拖动进度条"
+                  description="默认关闭；开启后成员可调节播放进度；房主与管理员始终可操作"
+                />
+
+                <Toggle
+                  checked={draftSongRequest.memberPauseEnabled}
+                  disabled={songRequestSaving}
+                  onChange={(memberPauseEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberPauseEnabled }))}
+                  label="允许成员暂停/播放"
+                  description="默认关闭；开启后成员可暂停或继续播放；房主与管理员始终可操作"
                 />
 
                 <Toggle

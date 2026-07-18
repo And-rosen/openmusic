@@ -1776,7 +1776,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec }, callback) => {
+  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, memberSeekEnabled, memberPauseEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
 
@@ -1793,6 +1793,8 @@ io.on('connection', (socket) => {
       cooldownSec,
       queueMaxLength,
       memberJumpEnabled,
+      memberSeekEnabled,
+      memberPauseEnabled,
       systemMediaPlayBound,
       systemMediaSkipBound,
       dislikeSkipMode,
@@ -2607,7 +2609,7 @@ io.on('connection', (socket) => {
 
     const updated = setPlaying(roomId, getSocketUserId(socket), isPlaying, socket.id);
     if (!updated) {
-      callback?.({ success: false, error: '仅房主可暂停/播放' });
+      callback?.({ success: false, error: '房间未允许成员暂停/播放' });
       return;
     }
     emitPlaybackOnly(roomId);
@@ -2626,7 +2628,7 @@ io.on('connection', (socket) => {
 
     const updated = seekTo(roomId, getSocketUserId(socket), time, socket.id);
     if (!updated) {
-      callback?.({ success: false, error: '仅房主或管理员可调节进度' });
+      callback?.({ success: false, error: '房间未允许成员调节进度' });
       return;
     }
     emitPlaybackOnly(roomId);

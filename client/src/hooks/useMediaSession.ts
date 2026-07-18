@@ -16,6 +16,7 @@ import {
   installBackgroundPlaybackGuards,
   isLikelySystemMediaSuspend,
 } from '../lib/backgroundPlayback';
+import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
 
 const SEEK_STEP_SEC = 10;
 const POSITION_UPDATE_MS = 1000;
@@ -56,6 +57,8 @@ export function useMediaSession({
     const syncHandlers = () => {
       const state = useRoomStore.getState();
       const canControl = state.canControlPlayback;
+      const canSeek = canSeekInRoom(state.room, canControl);
+      const canPause = canPauseInRoom(state.room, canControl);
       const hasTrack = Boolean(state.room?.current);
       const playBound = state.room?.systemMediaPlayBound !== false;
       const skipBound = state.room?.systemMediaSkipBound !== false;
@@ -63,10 +66,10 @@ export function useMediaSession({
       bindMediaSessionActions({
         play: hasTrack && playBound
           ? () => {
-              const { room } = useRoomStore.getState();
+              const { room, canControlPlayback } = useRoomStore.getState();
               if (!room?.current) return;
               const { localPlayback } = useAudioStore.getState();
-              if (canControl) {
+              if (canPauseInRoom(room, canControlPlayback)) {
                 if (!room.isPlaying) {
                   updateMediaSessionPlaybackState('playing');
                   void controlsRef.current.togglePlay(true);
@@ -76,7 +79,7 @@ export function useMediaSession({
                 }
                 return;
               }
-              // 无控制权：跟随房间，尝试恢复本机播放
+              // 无暂停/播放权限：跟随房间，尝试恢复本机播放
               localPlayback?.(true);
             }
           : undefined,
@@ -93,13 +96,13 @@ export function useMediaSession({
                 return;
               }
 
-              if (canControlPlayback) {
+              if (canPauseInRoom(room, canControlPlayback)) {
                 updateMediaSessionPlaybackState('paused');
                 localPlayback?.(false);
                 void controlsRef.current.togglePlay(false);
                 return;
               }
-              // 无控制权不能改房间状态：本地被系统暂停后立刻跟播恢复
+              // 无权限不能改房间状态：本地被系统暂停后立刻跟播恢复
               if (room.isPlaying) {
                 localPlayback?.(true);
               }
@@ -119,7 +122,7 @@ export function useMediaSession({
             }
           : undefined,
         seekbackward: hasTrack
-          ? (canControl
+          ? (canSeek
             ? (details) => {
               const step = Number(details.seekOffset) > 0 ? Number(details.seekOffset) : SEEK_STEP_SEC;
               const time = useAudioStore.getState().smoothPlaybackTime;
@@ -128,7 +131,7 @@ export function useMediaSession({
             : () => { syncPosition(); })
           : undefined,
         seekforward: hasTrack
-          ? (canControl
+          ? (canSeek
             ? (details) => {
               const step = Number(details.seekOffset) > 0 ? Number(details.seekOffset) : SEEK_STEP_SEC;
               const time = useAudioStore.getState().smoothPlaybackTime;
@@ -137,14 +140,14 @@ export function useMediaSession({
             : () => { syncPosition(); })
           : undefined,
         seekto: hasTrack
-          ? (canControl
+          ? (canSeek
             ? (details) => {
               if (typeof details.seekTime !== 'number' || !Number.isFinite(details.seekTime)) return;
               controlsRef.current.seekTo(Math.max(0, details.seekTime));
             }
             : () => { syncPosition(); })
           : undefined,
-        stop: hasTrack && canControl && playBound
+        stop: hasTrack && canPause && playBound
           ? () => {
               if (isLikelySystemMediaSuspend() && useRoomStore.getState().room?.isPlaying) {
                 updateMediaSessionPlaybackState('playing');
@@ -202,6 +205,8 @@ export function useMediaSession({
         || state.room?.current?.pic !== prev.room?.current?.pic
         || state.room?.isPlaying !== prev.room?.isPlaying
         || state.canControlPlayback !== prev.canControlPlayback
+        || state.room?.memberSeekEnabled !== prev.room?.memberSeekEnabled
+        || state.room?.memberPauseEnabled !== prev.room?.memberPauseEnabled
         || state.room?.systemMediaPlayBound !== prev.room?.systemMediaPlayBound
         || state.room?.systemMediaSkipBound !== prev.room?.systemMediaSkipBound
         || Boolean(state.room?.current) !== Boolean(prev.room?.current)

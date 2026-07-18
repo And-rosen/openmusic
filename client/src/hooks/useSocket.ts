@@ -1036,6 +1036,8 @@ if (s.connected) {
   const setSongRequestEnabled = useCallback((options: {
     enabled?: boolean;
     memberJumpEnabled?: boolean;
+    memberSeekEnabled?: boolean;
+    memberPauseEnabled?: boolean;
     systemMediaPlayBound?: boolean;
     systemMediaSkipBound?: boolean;
     dislikeSkipMode?: 'count' | 'percent';

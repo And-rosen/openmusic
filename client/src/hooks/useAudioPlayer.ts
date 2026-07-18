@@ -36,6 +36,7 @@ import {
   isLikelySystemMediaSuspend,
 } from '../lib/backgroundPlayback';
 import { ensureGalaxyAudioOutput } from '../components/galaxy/lib/galaxyAudio';
+import { canSeekInRoom } from '../lib/roomPermissions';
 import {
   prefetchUpcomingFromRoom,
   rememberSongUrl,
@@ -147,8 +148,8 @@ function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
 }
 
 function revertUnauthorizedSeek(audio: HTMLAudioElement): void {
-  if (useRoomStore.getState().canControlPlayback) return;
-  const live = useRoomStore.getState().room;
+  const { room: live, canControlPlayback } = useRoomStore.getState();
+  if (canSeekInRoom(live, canControlPlayback)) return;
   const current = live?.current;
   if (!current || !isAudioBoundToQueue(audio, current.queueId)) return;
 
@@ -1000,9 +1001,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [controller]);
 
   const handleSeek = useCallback((time: number) => {
-    if (!useRoomStore.getState().canControlPlayback) return;
+    const { room: live, canControlPlayback } = useRoomStore.getState();
+    if (!canSeekInRoom(live, canControlPlayback)) return;
 
-    const live = useRoomStore.getState().room;
     const current = live?.current;
     if (!live || !current) return;
 
