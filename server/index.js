@@ -144,9 +144,10 @@ const ALLOWED_ORIGINS = CLIENT_URL
 const CLIENT_ID_SECRET = process.env.CLIENT_ID_SECRET || randomBytes(32).toString('hex');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
-const ALLOW_INSECURE_HTTP_API = process.env.ALLOW_INSECURE_HTTP_API === '1'
+const IS_TEST_DEPLOYMENT = process.env.DEPLOYMENT_MODE === 'test';
+const ALLOW_INSECURE_HTTP_API = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_HTTP_API === '1'
   || process.env.ALLOW_INSECURE_HTTP_API === 'true';
-const ALLOW_INSECURE_COOKIES = process.env.ALLOW_INSECURE_COOKIES === '1'
+const ALLOW_INSECURE_COOKIES = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_COOKIES === '1'
   || process.env.ALLOW_INSECURE_COOKIES === 'true';
 /** 会话 HMAC 有效期（秒），默认 90 天 */
 const SESSION_TTL_SEC = Math.max(
