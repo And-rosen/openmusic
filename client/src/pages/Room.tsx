@@ -10,6 +10,7 @@ import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type Playlist
 import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
+import { detectPlaylistLink } from '../lib/playlistLink';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -871,6 +872,11 @@ export default function Room() {
 
   const handleSearch = useCallback(() => {
     const keyword = query.trim();
+    const detectedPlatform = detectPlaylistLink(keyword);
+    if (detectedPlatform) {
+      void handlePlaylistImport(detectedPlatform, keyword);
+      return;
+    }
     setActiveSearchMode(searchMode);
     if (searchMode === 'playlist') {
       setSearchedKeyword(keyword);
@@ -883,7 +889,7 @@ export default function Room() {
     setPlaylistSearchTotal(0);
     setSearchedKeyword(keyword);
     doSearch(keyword);
-  }, [query, searchMode, doPlaylistSearch, doSearch]);
+  }, [query, searchMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
 
   const handleSearchModeChange = useCallback((mode: SearchMode) => {
     if (mode === searchMode) return;
@@ -922,6 +928,11 @@ export default function Room() {
 
   const handleOverlaySearch = useCallback(() => {
     const keyword = overlayQuery.trim();
+    const detectedPlatform = detectPlaylistLink(keyword);
+    if (detectedPlatform) {
+      void handlePlaylistImport(detectedPlatform, keyword);
+      return;
+    }
     setActiveSearchMode(overlaySearchMode);
     if (overlaySearchMode === 'playlist') {
       setSearchedKeyword(keyword);
@@ -934,7 +945,7 @@ export default function Room() {
     setPlaylistSearchTotal(0);
     setSearchedKeyword(keyword);
     void doSearch(keyword);
-  }, [overlayQuery, overlaySearchMode, doPlaylistSearch, doSearch]);
+  }, [overlayQuery, overlaySearchMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
 
   const handleOverlaySearchModeChange = useCallback((mode: SearchMode) => {
     if (mode === overlaySearchMode) return;
@@ -1705,7 +1716,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手...'}
+          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -1828,7 +1839,7 @@ export default function Room() {
           value={overlayQuery}
           onChange={(e) => setOverlayQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleOverlaySearch()}
-          placeholder={overlaySearchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手...'}
+          placeholder={overlaySearchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -1853,7 +1864,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手...'}
+          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] tracking-wide text-white outline-none placeholder:text-white/22"
         />
         <button
