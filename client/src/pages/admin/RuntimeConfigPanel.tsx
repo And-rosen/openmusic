@@ -11,10 +11,10 @@ import {
   Row,
   Select,
   Space,
-  Spin,
   Tag,
   Typography,
 } from 'antd';
+import AdminLoading from './AdminLoading';
 import SettingsSection from './SettingsSection';
 import type { RuntimeConfig } from './types';
 import { adminFetch } from './utils';
@@ -167,11 +167,7 @@ export default function RuntimeConfigPanel({ onError }: { onError: (message: str
   };
 
   if (!draft) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-        <Spin />
-      </div>
-    );
+    return <AdminLoading tip="加载运行配置…" minHeight={200} />;
   }
 
   const markSecretDirty = (key: RuntimeTextField, nextValue: string) => {

@@ -1,7 +1,6 @@
 {
   "notes": [
-    "修复同IP下，无法一起听的问题",
-    "优化其他已知问题"
+    "优化已知问题"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

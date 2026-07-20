@@ -17,6 +17,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Collapse,
   Col,
   Divider,
   Drawer,
@@ -28,7 +29,6 @@ import {
   Row,
   Select,
   Space,
-  Spin,
   Switch,
   Table,
   Tag,
@@ -36,6 +36,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import AdminProviders from './admin/AdminProviders';
+import AdminLoading from './admin/AdminLoading';
 import { ADMIN_TABS, AUDIT_PAGE_SIZE, LIST_PAGE_SIZE, TAB_META } from './admin/constants';
 import CredentialsPanel from './admin/CredentialsPanel';
 import InitialSetupGate from './admin/InitialSetupGate';
@@ -737,26 +738,17 @@ function AdminPage() {
     },
     {
       title: '操作',
-      width: 220,
+      width: 120,
       fixed: 'right',
       render: (_, report) => (
-        <Space size="small">
-          <Button size="small" onClick={() => void openErrorReport(report.id)}>查看</Button>
-          {report.status === 'open' && (
-            <Button
-              size="small"
-              type="primary"
-              icon={<CheckCircleOutlined />}
-              loading={reportBusyId === report.id}
-              onClick={() => void resolveErrorReport(report.id, 'resolved')}
-            >
-              已处理
-            </Button>
-          )}
+        <Space size={4}>
+          <Button size="small" type="link" onClick={() => void openErrorReport(report.id)}>
+            处理
+          </Button>
           <Button
             size="small"
+            type="link"
             danger
-            icon={<DeleteOutlined />}
             loading={reportBusyId === report.id}
             onClick={() => void deleteErrorReportItem(report.id)}
           >
@@ -1054,7 +1046,7 @@ function AdminPage() {
               size="middle"
               columns={reportColumns}
               dataSource={errorReports}
-              scroll={{ x: 900 }}
+              scroll={{ x: 760 }}
               pagination={{
                 current: reportsPage,
                 pageSize: LIST_PAGE_SIZE,
@@ -1232,7 +1224,7 @@ function AdminPage() {
     return (
       <Layout style={{ minHeight: '100vh', background: '#f5f7fa' }}>
         <Content style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin size="large" />
+          <AdminLoading minHeight="100vh" tip="加载中…" />
         </Content>
       </Layout>
     );
@@ -1403,8 +1395,10 @@ function AdminPage() {
           if (reportBusyId) return;
           setReportDetail(null);
         }}
-        width={720}
-        title="错误上报详情"
+        width={560}
+        centered
+        title="处理错误上报"
+        styles={{ body: { paddingTop: 12, paddingBottom: 8 } }}
         footer={reportDetail ? (
           <Space wrap>
             <Button onClick={() => setReportDetail(null)}>关闭</Button>
@@ -1437,61 +1431,96 @@ function AdminPage() {
         ) : null}
       >
         {reportDetailLoading || !reportDetail ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin tip="加载上报详情…" />
-          </div>
+          <AdminLoading tip="加载上报详情…" minHeight={180} />
         ) : (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Space wrap>
-              <Tag color={reportDetail.status === 'open' ? 'warning' : 'success'}>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap size={8} align="center">
+              <Tag color={reportDetail.status === 'open' ? 'warning' : 'success'} style={{ margin: 0 }}>
                 {reportDetail.status === 'open' ? '待处理' : '已处理'}
               </Tag>
-              <Typography.Text code style={{ fontSize: 11 }}>{reportDetail.id}</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {formatAuditTime(reportDetail.createdAt)}
+                {reportDetail.meta?.nickname ? ` · ${String(reportDetail.meta.nickname)}` : ''}
+                {reportDetail.meta?.roomId ? ` · 房间 ${String(reportDetail.meta.roomId)}` : ''}
+                {reportDetail.ip ? ` · ${reportDetail.ip}` : ''}
+              </Typography.Text>
             </Space>
-            <Typography.Paragraph style={{ marginBottom: 0 }}>{reportDetail.description}</Typography.Paragraph>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {formatAuditTime(reportDetail.createdAt)}
-              {reportDetail.userId ? ` · user ${reportDetail.userId}` : ''}
-              {reportDetail.ip ? ` · ${reportDetail.ip}` : ''}
-            </Typography.Text>
-            <Card size="small" title="上下文">
-              <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {JSON.stringify(reportDetail.meta || {}, null, 2)}
-              </pre>
-            </Card>
-            <Card size="small" title={`Debug 事件（${reportDetail.events?.length || 0}）`}>
-              <pre style={{ margin: 0, fontSize: 11, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {(reportDetail.events || [])
-                  .map((ev) => `[${ev.at}] ${ev.name} ${ev.line}`)
-                  .join('\n') || '（无）'}
-              </pre>
-            </Card>
-            <Card size="small" title="Debug 快照">
-              <pre style={{ margin: 0, fontSize: 11, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {reportDetail.snapshot || '（无）'}
-              </pre>
-            </Card>
-            <Form layout="vertical">
+
+            <Typography.Paragraph
+              style={{ marginBottom: 0, fontSize: 13 }}
+              ellipsis={{ rows: 2, expandable: 'collapsible', symbol: (expanded) => (expanded ? '收起' : '展开') }}
+            >
+              {reportDetail.description}
+            </Typography.Paragraph>
+
+            <Form layout="vertical" requiredMark={false} style={{ marginBottom: 0 }}>
               <Form.Item
                 label="解决方案"
                 required={reportDetail.status !== 'resolved'}
-                extra="标记已处理后，上报用户若在线会立刻弹窗；否则下次进入站点或房间时弹出。"
+                style={{ marginBottom: 4 }}
+                extra={
+                  reportDetail.status === 'resolved' && reportDetail.solutionAckedAt
+                    ? `用户已于 ${formatAuditTime(reportDetail.solutionAckedAt)} 确认`
+                    : '处理后用户在线即弹窗，否则下次进入时弹出'
+                }
               >
                 <Input.TextArea
                   value={reportNoteDraft}
                   onChange={(e) => setReportNoteDraft(e.target.value)}
                   maxLength={500}
-                  rows={4}
+                  rows={2}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
                   showCount
-                  placeholder="写给用户的解决说明，例如：请清除浏览器缓存后刷新，或改用 Chrome…"
+                  placeholder="写给用户的解决说明…"
                 />
               </Form.Item>
-              {reportDetail.status === 'resolved' && reportDetail.solutionAckedAt ? (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  用户已于 {formatAuditTime(reportDetail.solutionAckedAt)} 确认解决方案
-                </Typography.Text>
-              ) : null}
             </Form>
+
+            <Collapse
+              size="small"
+              ghost
+              items={[
+                {
+                  key: 'debug',
+                  label: (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      调试信息
+                      {reportDetail.events?.length ? ` · ${reportDetail.events.length} 条事件` : ''}
+                      {reportDetail.snapshot ? ' · 有快照' : ''}
+                    </Typography.Text>
+                  ),
+                  children: (
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <div>
+                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>上下文</Typography.Text>
+                        <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                          {JSON.stringify(reportDetail.meta || {}, null, 2)}
+                        </pre>
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                          Debug 事件（{reportDetail.events?.length || 0}）
+                        </Typography.Text>
+                        <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                          {(reportDetail.events || [])
+                            .map((ev) => `[${ev.at}] ${ev.name} ${ev.line}`)
+                            .join('\n') || '（无）'}
+                        </pre>
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>Debug 快照</Typography.Text>
+                        <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                          {reportDetail.snapshot || '（无）'}
+                        </pre>
+                      </div>
+                      <Typography.Text type="secondary" copyable={{ text: reportDetail.id }} style={{ fontSize: 11 }}>
+                        ID {reportDetail.id}
+                      </Typography.Text>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
           </Space>
         )}
       </Modal>
@@ -1522,6 +1551,16 @@ function AdminPage() {
           flex: 1 0 auto;
           display: flex;
           flex-direction: column;
+        }
+        /* 表格 / 嵌套 Spin 水平垂直居中 */
+        .admin-content .ant-spin-nested-loading > div > .ant-spin {
+          max-height: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .admin-content .ant-spin-nested-loading .ant-spin-container::after {
+          background: rgba(255, 255, 255, 0.55);
         }
         @media (min-width: 768px) {
           .admin-mobile-menu-btn { display: none !important; }

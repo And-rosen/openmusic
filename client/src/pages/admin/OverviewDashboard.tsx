@@ -19,13 +19,13 @@ import {
   Progress,
   Row,
   Space,
-  Spin,
   Table,
   Tag,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { AdminOverview, MetingUpstreamStatus } from './types';
+import AdminLoading from './AdminLoading';
 import { formatUptime } from './utils';
 
 type Props = {
@@ -125,7 +125,7 @@ export default function OverviewDashboard({
   if (!overview) {
     return (
       <Card style={{ borderRadius: 12, minHeight: 240 }}>
-        <Spin style={{ display: 'block', margin: '80px auto' }} size="large" />
+        <AdminLoading tip="加载概览…" minHeight={240} />
       </Card>
     );
   }
