@@ -1,4 +1,4 @@
-# 🎵 OpenMusic
+<h1 align="center">🎵 OpenMusic</h1>
 
 <p align="center">
   <strong>多人实时在线点歌</strong><br/>
