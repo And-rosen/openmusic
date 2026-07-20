@@ -26,6 +26,7 @@ export default {
         'glow-pulse': 'glowPulse 3s ease-in-out infinite',
         'pulse-slow': 'pulseSlow 4s ease-in-out infinite',
         'ping-slow': 'pingSlow 3s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'gradient-x': 'gradientX 6s ease infinite',
       },
       keyframes: {
         fadeIn: {
@@ -59,6 +60,10 @@ export default {
         pingSlow: {
           '0%': { transform: 'scale(1)', opacity: '0.4' },
           '75%, 100%': { transform: 'scale(1.15)', opacity: '0' },
+        },
+        gradientX: {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
         },
       },
     },

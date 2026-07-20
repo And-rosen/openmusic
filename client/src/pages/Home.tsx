@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Music, Users, Radio, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History, Download, Smartphone,
+  Music, Users, ArrowRight, Lock, ListMusic,
+  Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, Smartphone,
+  Play, Activity, Search
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -33,19 +34,37 @@ function GiteeIcon({ className }: { className?: string }) {
   );
 }
 
-const repoLinkCls = 'p-2.5 rounded-xl text-white/50 border border-white/10 hover:text-white hover:bg-white/5 transition-colors';
+const repoLinkCls = 'p-2.5 rounded-full text-white/50 border border-white/5 bg-white/[0.02] hover:text-white hover:bg-white/10 hover:border-white/10 transition-all duration-300';
 
-function PlayingBars() {
+const COVER_GRADIENTS = [
+  'from-rose-500 to-orange-400',
+  'from-sky-500 to-indigo-500',
+  'from-violet-500 to-fuchsia-500',
+  'from-emerald-500 to-teal-400',
+  'from-amber-500 to-red-500',
+  'from-cyan-500 to-blue-500',
+  'from-pink-500 to-rose-500',
+  'from-lime-500 to-emerald-500',
+];
+
+function gradientForId(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return COVER_GRADIENTS[hash % COVER_GRADIENTS.length];
+}
+
+function EqualizerBars({ className = '' }: { className?: string }) {
   return (
-    <span className="inline-flex items-end gap-[3px] h-3.5">
-      {[0, 1, 2].map((i) => (
+    <span className={`inline-flex items-end gap-[3px] h-3.5 ${className}`}>
+      {[0, 1, 2, 3].map((i) => (
         <span
           key={i}
-          className="w-[3px] rounded-full bg-netease-red animate-pulse"
+          className="w-[3px] rounded-full bg-current animate-equalizer"
           style={{
-            height: `${8 + (i % 2) * 6}px`,
-            animationDelay: `${i * 0.15}s`,
-            animationDuration: '0.8s',
+            animationDelay: `${i * 0.12}s`,
+            animationDuration: `${0.7 + (i % 3) * 0.18}s`,
           }}
         />
       ))}
@@ -64,110 +83,188 @@ const RoomCard = memo(function RoomCard({
 }) {
   const isActive = room.isPlaying && room.currentSong;
   const hardLocked = isLobbyHardLocked(room);
+  const gradient = gradientForId(room.id);
 
-  const cardClassName = `group relative w-full text-left rounded-2xl border transition-all duration-300 overflow-hidden
+  const cardRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  const resetTilt = useCallback(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    el.style.setProperty('--rx', '0deg');
+    el.style.setProperty('--ry', '0deg');
+    el.style.setProperty('--tx', '0px');
+    el.style.setProperty('--ty', '0px');
+    el.style.setProperty('--tz', '0px');
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (hardLocked) return;
+    const el = cardRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;   // 0..1
+    const py = (e.clientY - rect.top) / rect.height;   // 0..1
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      el.style.setProperty('--rx', `${(0.5 - py) * 10}deg`);
+      el.style.setProperty('--ry', `${(px - 0.5) * 12}deg`);
+      // 朝鼠标一侧偏移
+      el.style.setProperty('--tx', `${(px - 0.5) * 14}px`);
+      el.style.setProperty('--ty', `${(py - 0.5) * 14}px`);
+      el.style.setProperty('--tz', '24px');
+      // 跟随鼠标的高光位置
+      el.style.setProperty('--mx', `${px * 100}%`);
+      el.style.setProperty('--my', `${py * 100}%`);
+    });
+  }, [hardLocked]);
+
+  useEffect(() => () => {
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+  }, []);
+
+  const cardClassName = `group relative w-full text-left rounded-[24px] border overflow-hidden backdrop-blur-md will-change-transform
     ${hardLocked
-      ? 'border-white/6 bg-[#141414]/80 opacity-70 cursor-not-allowed'
-      : isActive
-        ? 'border-netease-red/40 bg-gradient-to-br from-netease-red/10 via-[#1a1a1a] to-[#141414] shadow-lg shadow-netease-red/5 hover:shadow-netease-red/15 hover:border-netease-red/60'
-        : 'border-white/8 bg-[#161616]/90 hover:border-white/20 hover:bg-[#1c1c1c]'
+      ? 'border-white/5 bg-black/40 opacity-60 cursor-not-allowed'
+      : 'border-white/10 bg-gradient-to-br from-white/[0.09] to-white/[0.02] shadow-xl shadow-black/40 hover:border-white/25 hover:from-white/[0.14] hover:to-white/[0.04] hover:shadow-2xl hover:shadow-black/70'
     }`;
+
+  const tiltStyle: React.CSSProperties = hardLocked
+    ? {}
+    : {
+        transform:
+          'perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translate3d(var(--tx,0px),var(--ty,0px),var(--tz,0px))',
+        transition: 'transform 0.18s ease-out, border-color 0.3s ease, box-shadow 0.3s ease',
+        transformStyle: 'preserve-3d',
+      };
 
   const body = (
     <>
+      {/* 炫光背景 */}
       {isActive && !hardLocked && (
-        <div className="absolute inset-0 bg-gradient-to-r from-netease-red/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+        <div className={`absolute -top-20 -right-20 w-48 h-48 rounded-full bg-gradient-to-br ${gradient} opacity-[0.08] blur-3xl group-hover:opacity-20 transition-opacity duration-500 pointer-events-none`} />
       )}
 
-      <div className="relative p-5">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            {isRecent && (
-              <span className="flex-shrink-0 flex items-center gap-1 text-[10px] uppercase tracking-wide text-sky-400/90 bg-sky-500/10 px-1.5 py-0.5 rounded-md font-medium">
-                <History className="w-3 h-3" />
-                最近
+      {/* 鼠标跟随高光 */}
+      {!hardLocked && (
+        <div
+          className="pointer-events-none absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+          style={{
+            background:
+              'radial-gradient(340px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.14), transparent 60%)',
+          }}
+        />
+      )}
+
+      {/* 顶部细亮线，增强边缘立体感 */}
+      {!hardLocked && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+      )}
+
+      <div className="relative p-5 sm:p-6" style={{ transformStyle: 'preserve-3d' }}>
+        <div className="flex items-center gap-5" style={{ transformStyle: 'preserve-3d' }}>
+          {/* 封面区块（倾斜时视差浮起） */}
+          <div className="relative flex-shrink-0 transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(45px)]">
+            <div className={`w-16 h-16 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg transition-all duration-300 ${hardLocked ? 'grayscale' : 'group-hover:shadow-2xl group-hover:shadow-black/50 group-hover:scale-105'}`}>
+              {isActive && !hardLocked ? (
+                <EqualizerBars className="text-white drop-shadow-md scale-110" />
+              ) : (
+                <Disc3 className={`w-8 h-8 sm:w-10 sm:h-10 text-white/90 drop-shadow-md transition-transform duration-500 ${hardLocked ? '' : 'group-hover:rotate-[20deg]'} ${isActive && !hardLocked ? 'vinyl-disc vinyl-disc--playing' : ''}`} />
+              )}
+            </div>
+            {isActive && !hardLocked && (
+              <span className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-[#111] border border-white/10 backdrop-blur-md flex items-center justify-center shadow-xl">
+                <Play className="w-3.5 h-3.5 text-netease-red fill-netease-red ml-0.5" />
               </span>
-            )}
-            <h3 className={`text-base font-semibold truncate transition-colors ${hardLocked ? 'text-white/70' : 'text-white group-hover:text-netease-red'}`}>
-              {room.name}
-            </h3>
-            {room.hasPassword && (
-              <span className="flex-shrink-0 p-1 rounded-md bg-amber-500/10 text-amber-400/90">
-                <Lock className="w-3.5 h-3.5" />
-              </span>
-            )}
-            {hardLocked && (
-              <Tooltip content="已上锁，无法进入">
-                <span className="flex-shrink-0 p-1 rounded-md bg-red-500/10 text-red-400/90">
-                  <Lock className="w-3.5 h-3.5" />
-                </span>
-              </Tooltip>
             )}
           </div>
-          <span className="flex-shrink-0 flex items-center gap-1.5 text-xs text-white/50 bg-white/5 px-2.5 py-1 rounded-full">
-            <Users className="w-3.5 h-3.5" />
-            {room.userCount}
-          </span>
-        </div>
 
-        <div className="min-h-[3.5rem] mb-4">
-          {room.currentSong ? (
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                {room.isPlaying && !hardLocked && <PlayingBars />}
-                <span className="text-[10px] uppercase tracking-wider text-netease-red/80 font-medium">
-                  {room.isPlaying ? '正在播放' : '已暂停'}
+          {/* 信息区块（倾斜时视差浮起） */}
+          <div className="min-w-0 flex-1 flex flex-col h-full justify-center transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(24px)]">
+            <div className="flex items-center gap-2.5 mb-1.5">
+              {isRecent && (
+                <span className="flex-shrink-0 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-sky-200 bg-sky-500/20 ring-1 ring-sky-400/30 px-2 py-0.5 rounded-md font-bold shadow-[0_0_14px_rgba(56,189,248,0.35)]">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-sky-300" />
+                  </span>
+                  RECENT
+                </span>
+              )}
+              {/* 房间名 */}
+              <h3 className={`text-[17px] sm:text-lg font-extrabold truncate transition-colors duration-300 ${hardLocked ? 'text-white/50' : 'text-white/90 group-hover:text-white'}`}>
+                {room.name}
+              </h3>
+              {room.hasPassword && !hardLocked && (
+                <span className="flex-shrink-0 p-1 rounded-full bg-amber-400/10 text-amber-400 group-hover:bg-amber-400/20 transition-colors">
+                  <Lock className="w-3.5 h-3.5" />
+                </span>
+              )}
+            </div>
+
+            {room.currentSong ? (
+              <div className="min-w-0 pr-2">
+                <p className={`flex items-center gap-1.5 text-sm font-semibold truncate transition-colors ${isActive && !hardLocked ? 'text-white' : 'text-white/80'} group-hover:text-white`}>
+                  {isActive && !hardLocked && (
+                    <span className="flex-shrink-0 text-netease-red text-[13px] animate-pulse">♪</span>
+                  )}
+                  <span className="truncate">{room.currentSong.name}</span>
+                </p>
+                <p className="text-[13px] text-white/40 truncate mt-0.5 group-hover:text-white/60 transition-colors">
+                  {room.currentSong.artist}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-white/30 mt-1 italic group-hover:text-white/50 transition-colors">等待点播...</p>
+            )}
+
+            {/* 底部状态栏 */}
+            <div className="flex items-center gap-5 mt-4 pt-4 border-t border-white/[0.06] group-hover:border-white/[0.12] transition-colors">
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-white/50 group-hover:text-white/80 transition-colors">
+                  <Users className="w-3.5 h-3.5 text-white/40 group-hover:text-emerald-400 group-hover:scale-110 transition-all duration-300" />
+                  {room.userCount} 人
+                </span>
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-white/50 group-hover:text-white/80 transition-colors">
+                  <ListMusic className="w-3.5 h-3.5 text-white/40 group-hover:text-violet-400 group-hover:scale-110 transition-all duration-300" />
+                  {room.queueLength} 首
                 </span>
               </div>
-              <p className="text-sm font-medium text-white/90 truncate leading-snug">
-                {room.currentSong.name}
-              </p>
-              <p className="text-xs text-white/40 truncate mt-0.5">
-                {room.currentSong.artist}
-              </p>
+              
+              <span className="ml-auto">
+                {hardLocked ? (
+                  <span className="flex items-center gap-1 text-xs text-red-400/60 font-medium">
+                    <Lock className="w-3.5 h-3.5" />
+                    已上锁
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[13px] text-netease-red opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 font-bold">
+                    立即加入
+                    <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-0.5" />
+                  </span>
+                )}
+              </span>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 text-white/30">
-              <Disc3 className="w-4 h-4" />
-              <span className="text-sm">等待点播</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between pt-3 border-t border-white/5">
-          <span className="flex items-center gap-1.5 text-xs text-white/35">
-            <ListMusic className="w-3.5 h-3.5" />
-            队列 {room.queueLength} 首
-          </span>
-          {hardLocked ? (
-            <span className="flex items-center gap-1 text-xs text-red-400/70 font-medium">
-              <Lock className="w-3.5 h-3.5" />
-              已上锁
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-xs text-netease-red/80 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
-              进入
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-            </span>
-          )}
+          </div>
         </div>
       </div>
     </>
   );
 
   if (hardLocked) {
-    return (
-      <div className={cardClassName} aria-disabled="true">
-        {body}
-      </div>
-    );
+    return <div className={cardClassName} aria-disabled="true">{body}</div>;
   }
 
   return (
     <button
       type="button"
+      ref={(node) => { cardRef.current = node; }}
       onClick={() => onJoin(room)}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={resetTilt}
       className={cardClassName}
+      style={tiltStyle}
     >
       {body}
     </button>
@@ -187,17 +284,17 @@ function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/80 backdrop-blur-md transition-opacity"
         onClick={onClose}
         aria-label="关闭"
       />
-      <div className="relative w-full max-w-sm glass rounded-2xl border border-white/10 shadow-2xl p-6 animate-fade-in">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
+      <div className="relative w-full max-w-md bg-[#111111]/90 backdrop-blur-xl rounded-[32px] border border-white/10 shadow-2xl p-7 animate-fade-in">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-white tracking-tight">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-2 rounded-full text-white/40 bg-white/5 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -351,189 +448,192 @@ export default function Home() {
     };
   }, [rooms]);
 
-  const inputCls = 'w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-netease-red/50 transition-colors';
+  const inputCls = 'w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3.5 text-white text-[15px] placeholder:text-white/30 focus:outline-none focus:border-netease-red/60 focus:bg-white/[0.03] transition-all duration-300';
 
   return (
-    <div className="h-full flex flex-col relative overflow-hidden">
-      <div className="absolute inset-0 bg-[#0a0a0a]" />
-      <div className="absolute inset-0 bg-gradient-to-br from-netease-red/8 via-transparent to-purple-900/10 pointer-events-none" />
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-netease-red/5 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-purple-600/5 rounded-full blur-[100px] pointer-events-none" />
+    <div className="h-full flex flex-col relative overflow-hidden bg-[#050505] text-white font-sans selection:bg-netease-red/30">
+      {/* 背景光效 */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-[-20%] left-[10%] w-[600px] h-[600px] bg-netease-red/5 rounded-full blur-[140px] mix-blend-screen" />
+        <div className="absolute bottom-[-10%] right-[10%] w-[500px] h-[500px] bg-purple-600/5 rounded-full blur-[120px] mix-blend-screen" />
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.02]" />
+      </div>
 
-      {/* 顶栏：昵称 + 创建/加入 */}
-      <header className="relative z-20 flex-shrink-0 border-b border-white/5 glass safe-top">
-        <div className="relative h-14 sm:h-16">
-          <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-30 flex items-center gap-2">
-            {!isMobileDevice() && (
-              <>
-                <Tooltip content="下载 Android 客户端">
-                  <a
-                    href={ANDROID_APK_URL}
-                    download="openmusic.apk"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-emerald-400/90 border border-emerald-500/25 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Android</span>
-                  </a>
-                </Tooltip>
-                <Tooltip content="下载 iOS IPA（需 Sideloadly / AltStore 安装）">
-                  <a
-                    href={IOS_IPA_URL}
-                    download="openmusic.ipa"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-sky-400/90 border border-sky-500/25 hover:text-sky-300 hover:bg-sky-500/10 transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>iOS</span>
-                  </a>
-                </Tooltip>
-              </>
-            )}
-            <a
-              href="https://gitee.com/w3126197382/openmusic"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`hidden sm:flex ${repoLinkCls}`}
-              aria-label="Gitee 仓库"
-            >
-              <GiteeIcon className="w-4 h-4" />
-            </a>
-            <a
-              href="https://github.com/qq01-hub/openmusic"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`hidden sm:flex ${repoLinkCls}`}
-              aria-label="GitHub 仓库"
-            >
-              <Github className="w-4 h-4" />
-            </a>
-          </div>
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 sm:pr-72 h-full flex items-center gap-2 sm:gap-4 min-w-0">
-          <div className="flex items-center gap-2.5 flex-shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-netease-red/15 flex items-center justify-center">
-              <Music className="w-5 h-5 text-netease-red" />
+      {/* 悬浮顶栏 */}
+      <header className="relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+        <div className="bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-full px-5 py-3 flex items-center justify-between shadow-2xl">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-netease-red to-rose-600 flex items-center justify-center shadow-lg shadow-netease-red/20">
+              <Music className="w-5 h-5 text-white" />
             </div>
-            <span className="hidden sm:block text-lg font-bold text-gradient">OpenMusic</span>
+            <span className="text-xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
+              OpenMusic
+            </span>
           </div>
 
-          <div className="flex-1 min-w-0 sm:max-w-xs">
-            <input
-              type="text"
-              value={nickname}
-              onChange={(e) => { setNickname(e.target.value); setError(''); }}
-              placeholder="你的昵称"
-              maxLength={20}
-              className={`${inputCls} py-2`}
-            />
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => { setError(''); setShowJoin(true); }}
-              className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm text-white/80 border border-white/10 hover:bg-white/5 transition-colors"
-            >
-              <Hash className="w-4 h-4" />
-              加入
-            </button>
-            <button
-              type="button"
-              onClick={() => { setError(''); setShowJoin(true); }}
-              className="sm:hidden p-2.5 rounded-xl text-white/80 border border-white/10 hover:bg-white/5"
-              aria-label="加入房间"
-            >
-              <Hash className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => { setError(''); setShowCreate(true); }}
-              className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-netease-red hover:bg-red-500 text-white transition-all hover:shadow-lg hover:shadow-netease-red/20"
-            >
-              <Plus className="w-4 h-4" />
-              <span>创建房间</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setError(''); setShowCreate(true); }}
-              className="sm:hidden p-2.5 rounded-xl bg-netease-red hover:bg-red-500 text-white transition-all"
-              aria-label="创建房间"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+          <div className="flex items-center gap-3">
+            {!isMobileDevice() && (
+              <div className="hidden lg:flex items-center gap-2 mr-2">
+                <Tooltip content="下载 Android 客户端">
+                  <a href={ANDROID_APK_URL} download="openmusic.apk" className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all">
+                    <Download className="w-4 h-4" /> Android
+                  </a>
+                </Tooltip>
+                <Tooltip content="下载 iOS IPA（需自签安装）">
+                  <a href={IOS_IPA_URL} download="openmusic.ipa" className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all">
+                    <Download className="w-4 h-4" /> iOS
+                  </a>
+                </Tooltip>
+              </div>
+            )}
+            <a href="https://gitee.com/w3126197382/openmusic" target="_blank" rel="noopener noreferrer" className={`hidden sm:flex ${repoLinkCls}`} aria-label="Gitee">
+              <GiteeIcon className="w-5 h-5" />
+            </a>
+            <a href="https://github.com/qq01-hub/openmusic" target="_blank" rel="noopener noreferrer" className={`hidden sm:flex ${repoLinkCls}`} aria-label="GitHub">
+              <Github className="w-5 h-5" />
+            </a>
             {isMobileDevice() && (
-              <Tooltip content="下载客户端">
-                <button
-                  type="button"
-                  onClick={() => setDownloadModalOpen(true)}
-                  className="sm:hidden p-2.5 rounded-xl text-white/70 border border-white/10 hover:text-white hover:bg-white/5 transition-colors"
-                  aria-label="下载客户端"
-                >
-                  <Smartphone className="w-4 h-4" />
-                </button>
-              </Tooltip>
+              <button type="button" onClick={() => setDownloadModalOpen(true)} className={repoLinkCls} aria-label="App">
+                <Smartphone className="w-5 h-5" />
+              </button>
             )}
           </div>
-        </div>
         </div>
       </header>
 
-      {/* 中间：房间列表 */}
-      <main className="relative z-10 flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white mb-1">
-                <span className="sr-only">OpenMusic 在线点歌 - </span>
-                房间大厅
-              </h1>
-              <p className="text-sm text-white/40">选择一个房间加入，或创建你自己的</p>
+      {/* 滚动内容区 */}
+      <main className="relative z-10 flex-1 overflow-y-auto pb-20 custom-scrollbar">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16">
+          
+          {/* 精简居中版 Hero Section */}
+          <section className="mb-16 flex flex-col items-center text-center max-w-3xl mx-auto">
+            {/* 状态徽章 */}
+            <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur-md text-xs sm:text-[13px] font-medium text-white/70">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+              多人实时同步 · 边听边聊
             </div>
+
+            <h1 className="relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5">
+              和喜欢的人 <br className="sm:hidden" />
+              <span className="relative inline-block sm:ml-4">
+                {/* 底部辉光 */}
+                <span
+                  aria-hidden
+                  className="absolute inset-0 text-transparent bg-clip-text bg-gradient-to-r from-netease-red via-rose-400 to-purple-500 blur-2xl opacity-60 select-none animate-gradient-x"
+                  style={{ backgroundSize: '200% auto' }}
+                >
+                  听同一首歌
+                </span>
+                <span
+                  className="relative text-transparent bg-clip-text bg-gradient-to-r from-netease-red via-rose-400 to-purple-500 animate-gradient-x"
+                  style={{ backgroundSize: '200% auto' }}
+                >
+                  听同一首歌
+                </span>
+              </span>
+            </h1>
+
+            <p className="text-[15px] sm:text-lg text-white/55 mb-10 max-w-xl leading-relaxed">
+              全网曲库秒搜秒播，歌词实时同步，打破距离的限制，创建属于你们的
+              <span className="text-white/80 font-medium">专属音乐宇宙</span>。
+            </p>
+
+            {/* 居中控制台 (Command Bar) */}
+            <div className="w-full bg-white/[0.03] border border-white/10 rounded-[28px] sm:rounded-full p-2.5 flex flex-col sm:flex-row gap-2.5 shadow-2xl backdrop-blur-xl">
+              <div className="relative flex-1 group">
+                <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
+                  <Users className="w-5 h-5 text-white/40 group-focus-within:text-netease-red transition-colors" />
+                </div>
+                <input
+                  type="text"
+                  value={nickname}
+                  onChange={(e) => { setNickname(e.target.value); setError(''); }}
+                  placeholder="给自己起个昵称..."
+                  maxLength={20}
+                  className="w-full h-12 sm:h-14 bg-transparent pl-14 pr-6 text-white placeholder:text-white/30 outline-none focus:bg-white/[0.04] rounded-full transition-all text-[15px]"
+                />
+              </div>
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setShowCreate(true); }}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 sm:px-8 h-12 sm:h-14 rounded-full bg-netease-red hover:bg-red-500 text-white font-semibold shadow-lg shadow-netease-red/25 hover:shadow-netease-red/40 transition-all active:scale-95 whitespace-nowrap"
+                >
+                  <Plus className="w-5 h-5" />
+                  创建房间
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setShowJoin(true); }}
+                  className="flex-1 sm:flex-none flex items-center justify-center px-6 sm:px-8 h-12 sm:h-14 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 text-white font-medium transition-all active:scale-95 whitespace-nowrap"
+                >
+                  加入
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="mt-4 flex items-center gap-2 px-5 py-3 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-sm animate-fade-in">
+                <Activity className="w-4 h-4" /> {error}
+              </div>
+            )}
+          </section>
+
+          {/* 房间列表区（突出显示，变宽） */}
+          <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-5">
+            <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+              大厅
+              {rooms.length > 0 && (
+                <span className="text-sm font-medium bg-white/10 text-white/80 px-3 py-1 rounded-full align-middle">
+                  {rooms.length} 活跃
+                </span>
+              )}
+            </h2>
             <button
               type="button"
               onClick={() => fetchRooms()}
               disabled={roomsLoading}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-white/50 border border-white/10 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+              className="group flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all disabled:opacity-50"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${roomsLoading ? 'animate-spin' : ''}`} />
-              刷新
+              <RefreshCw className={`w-4 h-4 group-hover:rotate-180 transition-transform duration-500 ${roomsLoading ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">刷新列表</span>
             </button>
           </div>
 
-          {error && (
-            <div className="mb-4 px-4 py-3 rounded-xl bg-netease-red/10 border border-netease-red/20 text-netease-red text-sm text-center">
-              {error}
-            </div>
-          )}
-
           {roomsLoading && rooms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-white/30">
-              <Loader2 className="w-8 h-8 animate-spin mb-3" />
-              <p className="text-sm">加载房间中...</p>
+            <div className="flex flex-col items-center justify-center py-32 text-white/40">
+              <Loader2 className="w-10 h-10 animate-spin mb-4 text-netease-red" />
+              <p className="text-base font-medium">寻找房间中...</p>
             </div>
           ) : rooms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 sm:py-28">
-              <div className="w-20 h-20 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-5">
-                <Radio className="w-9 h-9 text-white/20" />
+            <div className="flex flex-col items-center justify-center py-24 px-4 text-center bg-white/[0.01] border border-white/5 rounded-[32px]">
+              <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center mb-6 shadow-inner">
+                <Search className="w-10 h-10 text-white/20" />
               </div>
-              <p className="text-lg font-medium text-white/60 mb-2">还没有活跃房间</p>
-              <p className="text-sm text-white/35 mb-6">成为第一个创建房间的人吧</p>
+              <h3 className="text-2xl font-bold text-white mb-3">当前没有活跃房间</h3>
+              <p className="text-white/40 mb-8 max-w-sm">一切都很安静。不如由你来开启第一首歌，邀请朋友们一起来听吧。</p>
               <button
                 type="button"
                 onClick={() => { setError(''); setShowCreate(true); }}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-netease-red hover:bg-red-500 text-white text-sm font-medium transition-colors"
+                className="flex items-center gap-2 px-8 py-4 rounded-full bg-white text-black font-bold hover:bg-white/90 hover:scale-105 transition-all"
               >
-                <Plus className="w-4 h-4" />
-                创建房间
+                <Plus className="w-5 h-5" />
+                创建我的房间
               </button>
             </div>
           ) : (
-            <div className="space-y-8">
+            <div className="space-y-10">
               {recentRooms.length > 0 && (
                 <section>
-                  <div className="flex items-center gap-2 mb-4">
-                    <History className="w-4 h-4 text-sky-400/80" />
-                    <h2 className="text-sm font-medium text-white/70">最近访问</h2>
+                  <div className="flex items-center gap-2 mb-6">
+                    <History className="w-5 h-5 text-sky-400" />
+                    <h3 className="text-lg font-bold text-white">最近去过</h3>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* 这里改成了更宽的网格，最大 3 列，从而让卡片变宽 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6">
                     {recentRooms.map((room) => (
                       <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} isRecent />
                     ))}
@@ -543,9 +643,13 @@ export default function Home() {
               {otherRooms.length > 0 && (
                 <section>
                   {recentRooms.length > 0 && (
-                    <h2 className="text-sm font-medium text-white/50 mb-4">全部房间</h2>
+                    <div className="flex items-center gap-2 mb-6 mt-4">
+                      <Search className="w-5 h-5 text-white/50" />
+                      <h3 className="text-lg font-bold text-white/80">探索更多</h3>
+                    </div>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* 同样最大 3 列，保证宽度充足 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6">
                     {otherRooms.map((room) => (
                       <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} />
                     ))}
@@ -557,108 +661,83 @@ export default function Home() {
         </div>
       </main>
 
-      {/* 底栏 */}
-      <footer className="relative z-10 flex-shrink-0 border-t border-white/5 py-3 px-4">
-        <div className="flex flex-col items-center gap-2.5">
-          <div className="flex justify-center gap-6 sm:gap-10 text-white/25 text-xs">
-            <span className="flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5" />
-              多人实时同步
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Music className="w-3.5 h-3.5" />
-              三平台曲库
-            </span>
-          </div>
-          <p className="text-xs text-white/35">
-            友链：
-            <a
-              href="https://linux.do/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-1 text-white/50 transition-colors hover:text-white/75"
-            >
-              Linux.do
-            </a>
-          </p>
-          {/* <p className="flex flex-wrap items-center justify-center gap-1 text-xs text-white/35">
-            本网站由
-            <a
-              href="https://www.upyun.com/?utm_source=lianmeng&utm_medium=referral"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex opacity-80 hover:opacity-100 transition-opacity"
-              aria-label="又拍云"
-            >
-              <img src="/又拍云_logo5.png" alt="又拍云" className="h-6 w-auto" />
-            </a>
-            提供 CDN 加速 / 云存储服务
-          </p> */}
-        </div>
-      </footer>
-
+      {/* 弹窗: 创建房间 */}
       {showCreate && (
-        <Modal title="创建房间" onClose={() => { setShowCreate(false); setCreateRoomName(''); setCreatePassword(''); }}>
-          <p className="text-sm text-white/45 mb-4">先给你的房间起个名字，方便大家在大厅里找到</p>
-          <label className="block text-xs text-white/50 mb-1.5">房间名称</label>
-          <input
-            type="text"
-            value={createRoomName}
-            onChange={(e) => setCreateRoomName(e.target.value)}
-            placeholder="例如：周杰伦专场"
-            maxLength={30}
-            className={`${inputCls} mb-4`}
-          />
-          <label className="block text-xs text-white/50 mb-1.5">房间密码（可选）</label>
-          <input
-            type="password"
-            value={createPassword}
-            onChange={(e) => setCreatePassword(e.target.value)}
-            placeholder="留空则无需密码"
-            maxLength={32}
-            className={`${inputCls} mb-5`}
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={actionLoading}
-            className="w-full flex items-center justify-center gap-2 bg-netease-red hover:bg-red-500 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors"
-          >
-            {actionLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-            创建并进入
-          </button>
+        <Modal title="创建新房间" onClose={() => { setShowCreate(false); setCreateRoomName(''); setCreatePassword(''); }}>
+          <div className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-white/60 mb-2 pl-1">给房间起个名字</label>
+              <input
+                type="text"
+                value={createRoomName}
+                onChange={(e) => setCreateRoomName(e.target.value)}
+                placeholder="例如：周杰伦专场、深夜EMO"
+                maxLength={30}
+                className={inputCls}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/60 mb-2 pl-1">访问密码 <span className="text-white/30 font-normal">(可选)</span></label>
+              <input
+                type="password"
+                value={createPassword}
+                onChange={(e) => setCreatePassword(e.target.value)}
+                placeholder="留空即为公开房间"
+                maxLength={32}
+                className={inputCls}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={actionLoading}
+              className="w-full flex items-center justify-center gap-2 bg-white text-black hover:bg-gray-200 disabled:opacity-50 font-bold py-4 rounded-2xl transition-all mt-2"
+            >
+              {actionLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+              开启音乐之旅
+            </button>
+          </div>
         </Modal>
       )}
 
+      {/* 弹窗: 加入房间 */}
       {showJoin && (
         <Modal title="加入房间" onClose={() => { setShowJoin(false); setJoinCode(''); setJoinPassword(''); }}>
-          <label className="block text-xs text-white/50 mb-1.5">房间号</label>
-          <input
-            type="text"
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-            placeholder="6 位房间号"
-            maxLength={6}
-            className={`${inputCls} uppercase tracking-widest mb-4`}
-          />
-          <label className="block text-xs text-white/50 mb-1.5">密码（如有）</label>
-          <input
-            type="password"
-            value={joinPassword}
-            onChange={(e) => setJoinPassword(e.target.value)}
-            placeholder="无密码可留空"
-            maxLength={32}
-            className={`${inputCls} mb-5`}
-          />
-          <button
-            type="button"
-            onClick={handleJoinByCode}
-            disabled={actionLoading}
-            className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 disabled:opacity-50 text-white font-medium py-3 rounded-xl border border-white/10 transition-colors"
-          >
-            {actionLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
-            加入房间
-          </button>
+          <div className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-white/60 mb-2 pl-1">房间代码</label>
+              <input
+                type="text"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="输入 6 位房间号"
+                maxLength={6}
+                className={`${inputCls} uppercase tracking-[0.2em] font-mono text-center text-lg`}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/60 mb-2 pl-1">房间密码 <span className="text-white/30 font-normal">(如未上锁请留空)</span></label>
+              <input
+                type="password"
+                value={joinPassword}
+                onChange={(e) => setJoinPassword(e.target.value)}
+                placeholder="输入密码"
+                maxLength={32}
+                className={inputCls}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleJoinByCode}
+              disabled={actionLoading}
+              className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 disabled:opacity-50 text-white font-bold py-4 rounded-2xl transition-all mt-2"
+            >
+              {actionLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
+              立即加入
+            </button>
+          </div>
         </Modal>
       )}
 
